@@ -1,0 +1,87 @@
+{
+  "name": "lattice-notes",
+  "version": "0.1.0",
+  "description": "A local-first Markdown knowledge workspace with explicit AI context controls.",
+  "main": "dist-electron/main.js",
+  "author": "Lattice Notes contributors",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"npm:dev:electron\"",
+    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "smoke:packaged": "cross-env LATTICE_PACKAGED=1 node scripts/smoke.mjs",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "package:win": "npm run build && electron-builder --win nsis portable"
+  },
+  "dependencies": {
+    "@uiw/react-codemirror": "^4.23.13",
+    "@codemirror/lang-markdown": "^6.3.4",
+    "@codemirror/language-data": "^6.5.2",
+    "chokidar": "^4.0.3",
+    "cytoscape": "^3.33.1",
+    "js-yaml": "^4.1.0",
+    "lucide-react": "^0.544.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@types/cytoscape": "^3.21.9",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.18.1",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.0.0",
+    "electron": "^37.4.0",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9.35.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0",
+    "prettier": "^3.6.2",
+    "playwright": "^1.55.0",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.42.0",
+    "vite": "^7.1.4",
+    "vitest": "^3.2.4",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "app.latticenotes.desktop",
+    "productName": "Lattice Notes",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "artifactName": "Lattice-Notes-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "portable": {
+      "artifactName": "Lattice-Notes-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}
