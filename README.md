@@ -1,112 +1,71 @@
-# Lattice Notes
+# Notus
 
-Lattice Notes is a Windows-first, local-first Markdown knowledge workspace with explicit AI context controls. It opens ordinary folders as vaults, keeps `.md` files as the source of truth, and makes every AI file change reviewable and recoverable.
+A Windows Markdown app with a quiet, Ohana-inspired interface. Opens directly into your workspace. No account, server, AI runtime, database, or starter content.
 
-![Vault Manager](artifacts/vault-manager.png)
+## Stack
 
-![Note workspace](artifacts/workspace-note.png)
+- Tauri 2 and a small Rust backend for native windows and validated filesystem operations.
+- React 19, TypeScript and Vite for the interface.
+- CodeMirror 6 for editing; React Markdown and remark-gfm for reading.
+- Plain folders and UTF-8 `.md` files as the source of truth.
 
-## What works in 0.1.0
+Tauri uses Windows WebView2 instead of shipping Chromium with each app. This keeps distribution smaller. The app remains a web interface in a native window; using Rust does not replace careful filesystem validation or save tests.
 
-- A dedicated Vault Manager with search, recent/name sort, pinning, list/grid views, availability state, paths, File Explorer reveal, and safe unregistering. Removing a vault never deletes its folder.
-- Create a new vault under a native-picker parent folder, optionally with Inbox, Notes, Projects, Sources, Attachments, Templates, Archive, and a welcome note. Register any existing folder without moving it.
-- Native nested file tree with note/folder creation, rename, duplicate, refresh, and Recycle Bin deletion.
-- Atomic autosave with visible status. Disk modification times are checked before writes so external edits produce a conflict instead of a silent overwrite.
-- Source editing with CodeMirror and GFM reading mode with headings, task lists, tables, quotes, code, links, and safe local images. Raw HTML is not executed.
-- YAML frontmatter surfaced as editable properties for strings, numbers, booleans, dates, and lists/tags. Invalid YAML stays intact and can be repaired in Source mode.
-- Wiki links (`[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`) and local Markdown note links, backlink excerpts, unresolved links, full-vault search, and an interactive graph with drag/pan/zoom, orphan/unresolved styles, layout pause, node opening, and an accessible list alternative.
-- Rename impact detection. Lattice lists referring notes before an optional link update and snapshots each changed file.
-- Local and online OpenAI-compatible AI routes, a provider/model library, secure API-key encryption through Electron `safeStorage`, explicit context scope, prominent local/online status, and Ask/Suggest/Edit modes.
-- AI output is never written immediately. Suggest/Edit opens a before/after review; apply creates a vault-local snapshot first. Reject and copy are always available.
-- Reduced-motion support, strong focus states, semantic controls, keyboard-accessible navigation, and an original Lucide-based dark interface.
+## Workspace
 
-## Privacy and trust model
+Default location: your Windows Documents folder, under `Notus`. Click **Workspace** in the sidebar footer to select another parent folder. Switching roots does not move or delete the previous workspace.
 
-Core note features require no account and no cloud service. Local model requests default to `http://127.0.0.1:1234/v1`. Online requests show an amber disclosure and send only the selected context—never the whole vault by default.
+```text
+Notus/
+  Work/                   # vault
+    Research/             # subfolder
+      Ideas/              # optional deeper subfolder
+        First thought.md
+  Personal/               # another vault
+    Journal/
+      September.md
+```
 
-API keys are encrypted using the operating system-backed mechanism exposed by Electron `safeStorage`, then stored in the app profile. Keys are never written into a vault, browser local storage, logs, or source control.
+Create a vault with the plus beside **VAULTS**. Right-click a row or use its three-dot menu. Vaults offer **New folder**, **New note**, and **Vault settings**; folders offer **New note**, **New subfolder**, **Rename**, and **Delete**; notes offer **Rename** and **Delete**. New notes may live at a vault's root or inside any of its subfolders, never directly in the workspace root.
 
-Markdown, links, imported text, and model output are treated as untrusted. Reading mode skips raw HTML and code blocks are displayed, never executed. Filesystem calls resolve and validate every relative path against the active vault root. Significant AI and rename-link changes create copies under `.lattice/history/` before modification.
+Creation and renaming happen inline in the sidebar: **Enter** confirms; **Escape** cancels without creating or renaming a file. Errors appear beside the input. Menus open beside their row and stay inside the window; arrow keys navigate, Escape dismisses and restores focus. Deletion requires confirmation and sends files to the Windows Recycle Bin. Drag notes or subfolders onto a folder or vault, including another vault. Duplicate names are rejected without overwriting files. Move/rename does not rewrite links inside other Markdown files.
 
-## AI setup
+**Vault settings** supports rename, location/reveal in File Explorer, **Remove from sidebar** (files stay untouched), and a separate confirmed **Delete vault** action. Hidden registrations are a per-workspace local UI preference; restore them through **Hidden vaults** in the sidebar footer. No additional vault settings are invented.
 
-### Local route (LM Studio or another compatible runtime)
+**Import existing vault** copies a chosen folder into the workspace and leaves the source untouched. Imported root-level Markdown files are placed in an `Imported root notes` subfolder. Hidden metadata directories are skipped. New vaults are completely empty. Previous Lattice vaults are not automatically copied, changed, or deleted.
 
-1. Install a runtime that exposes an OpenAI-compatible HTTP server, such as LM Studio.
-2. Download a compatible instruct model in that runtime. The in-app catalog lists a small, honest set of GGUF starting points and links to their Hugging Face search pages; Lattice does not imply arbitrary repositories can run directly.
-3. Start the local server, typically at `http://127.0.0.1:1234/v1`.
-4. In **Model Library → Local runtime → Configure**, enter the server URL and the model identifier shown by your runtime.
-5. Open a note, choose Local processing, choose the context scope, and run Ask/Suggest/Edit.
+## Editing and recovery
 
-Model downloads, process lifecycle, progress, removal, and updates remain the responsibility of the local runtime in 0.1.0. Lattice shows curated format, approximate size, memory guidance, publisher, license, and source links, but does not yet manage model binaries itself.
+Changes autosave after a short idle period, and pending saves finish before note navigation or window close. Writes use a content revision check and atomic replacement. Drafts are also kept in WebView local storage for crash recovery. If the disk file changed, saving stops and **Save recovery copy** preserves the draft in a separate Markdown file.
 
-### Online OpenAI-compatible route
+Outside edits refresh while the note is clean. Markdown frontmatter is preserved in source and omitted from the reading view. This release supports ordinary Markdown/GFM rendering; it does not provide Obsidian plugins, graph views, attachment management, or wiki-link navigation.
 
-1. Open **Model Library → OpenAI-compatible → Configure**.
-2. Set the base URL and model identifier.
-3. Enter the API key. It is encrypted with OS-backed secure storage.
-4. Before sending, verify the amber disclosure and context selector.
+Light/dark theme, sidebar visibility and the last open note are remembered. A single 44px title bar integrates sidebar/search controls, tabs, save status and window controls. Its empty space uses Tauri's native drag region; double-click toggles maximize. Buttons are not drag regions. There is no File/Edit menu or second native title strip. **+** opens an empty tab and never creates a file. Opening a note fills the active tab (or selects an already-open copy); tab switching and closing flush drafts. The last note, not the whole tab set, restores after restarting.
 
-Google Gemini can be used only through an OpenAI-compatible gateway in this release; a native Gemini adapter is planned.
-
-## Markdown and links
-
-Lattice indexes `.md` and `.markdown` recursively and ignores its private `.lattice` recovery directory. Wiki-link resolution matches titles, basenames, and vault-relative note paths case-insensitively. Heading and alias syntax is parsed; global graph edges currently resolve most reliably by note title or basename. External HTTP links remain ordinary rendered links. Remote images are not fetched by Lattice itself; Chromium may request a remote URL when a note explicitly embeds one.
+| Shortcut | Action                               |
+| -------- | ------------------------------------ |
+| Ctrl+N   | Create note in selected vault/folder |
+| Ctrl+S   | Save current note                    |
+| Ctrl+B   | Toggle sidebar                       |
+| Ctrl+P   | Focus sidebar search                 |
 
 ## Development
 
-Requirements: Windows 10/11, Node.js 20 or newer, and npm.
+Requires Node.js, Rust MSVC, Visual Studio C++ build tools, and Windows WebView2.
 
-```powershell
-npm install
+```sh
+npm ci
 npm run dev
-```
-
-Quality checks:
-
-```powershell
-npm run format:check
 npm run lint
 npm test
-npm run build
+npm run test:native
+npm run package:win
 npm run smoke
 ```
 
-The smoke test launches the production Electron bundle with an isolated temporary app profile and sample vault. It verifies the Vault Manager, local note reading, indexing, graph rendering, and captures the README screenshots in `artifacts/`.
+`npm run package:win` produces the NSIS installer in `src-tauri/target/release/bundle/nsis/`.
+`npm run smoke` launches the real built Tauri executable against a temporary workspace and WebView profile using a loopback debugging port. It tests exact contextual actions, inline parent placement/cancellation/collisions, tabs, save/recovery, registration removal/restoration, native minimize/maximize/restore, title-bar double-click, viewport clamping and sidebar collapse. Use `NOTUS_EXECUTABLE` to test an installed executable. Explicit `NOTUS_ROOT` overrides bypass single-instance handling so isolated tests never redirect into a user's running app. Test-only environment variables are not set on the desktop shortcut. The earlier 0.2.0 smoke script is retained as historical test context, not the current runner.
 
-## Windows packaging
+The Rust filesystem boundary rejects traversal, Windows reserved names, linked paths and overwrite collisions. Native dialogs are used only to select/import a workspace folder. No broad filesystem plugin is exposed to the frontend.
 
-```powershell
-npm run package:win
-```
-
-Artifacts are written to `release/`. The configured build targets are an interactive NSIS installer and a portable `.exe`. If Windows executable post-processing is blocked, `release/win-unpacked/Lattice Notes.exe` plus its sibling files is the verified fallback and can be distributed as the generated `Lattice-Notes-0.1.0-Windows-x64.zip`.
-
-## Architecture
-
-- `electron/main.ts`: native window, dialogs, vault registry, filesystem operations, watcher, secure secrets, snapshots, and provider HTTP transport.
-- `electron/preload.ts`: narrow context-isolated IPC bridge; the renderer has no Node access.
-- `electron/safety.ts`: vault boundary and Windows filename rules.
-- `src/core/markdown.ts`: frontmatter, links, indexing, and edit primitives with focused tests.
-- `src/App.tsx`: Vault Manager, workspace, Markdown surfaces, search, graph, provider library, AI review, settings, and recovery UI.
-- `design-system/lattice-notes/MASTER.md`: persisted visual contract generated before UI implementation.
-
-## Known first-release limits
-
-- File-tree drag reordering, tab dragging/pinning, a visual history restore browser, and a three-way merge UI are not yet implemented. Conflicts preserve the draft and offer a disk reload path.
-- Search rebuilds the in-memory index after relevant operations rather than using a durable background database; very large vaults may refresh slowly.
-- Graph filters and local-depth controls are present at the UI level, but local-graph traversal is basic and global graph is the primary tested path.
-- Direct Hugging Face download/runtime management is intentionally delegated to a compatible local runtime.
-- AI selection context falls back to an explicit “no selection provided” marker; selection extraction from CodeMirror is not yet wired.
-- Conversation history is intentionally off and is not persisted in 0.1.0.
-- Windows code signing is not included. SmartScreen may warn on an unsigned community build.
-
-## Security notes
-
-Do not expose a local model server to untrusted networks. Review provider URLs before entering a key. Treat model responses as drafts. Keep backups for important vaults; snapshots supplement backups but are not a replacement for them.
-
-Lattice Notes is an original project and does not copy Obsidian source, branding, logos, or bundled assets.
-
-## License
-
-MIT
+The source checkout may still be stored under its original `Obsidian Clone` directory; the product, package and installer are named Notus.
