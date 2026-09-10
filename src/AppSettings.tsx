@@ -13,6 +13,7 @@ import {
 import { exportSettings, importSettings } from "./portableSettings";
 import { AISettings } from "./AISettings";
 import { api, type BackupPreview, type TrashItem } from "./notus";
+import release from "../package.json";
 
 export function AppSettings({
   root,
@@ -109,8 +110,8 @@ export function AppSettings({
               "Appearance",
               "Workspace",
               "AI models",
-              "About",
               "Export / Import",
+              "About",
               "Trash",
             ] as const
           ).map((value) => (
@@ -170,6 +171,8 @@ export function AppSettings({
             <section className="about-lotus">
               <h3>About Lotus</h3>
               <p>Lotus is a local-first workspace for Markdown notes. Your notes remain in the folders you choose on this computer.</p>
+              <h4>Release</h4>
+              <p>Lotus {release.version}</p>
               <h4>Privacy</h4>
               <p>Lotus does not run its own cloud for your notes or store their contents elsewhere. It reads and writes only the local vault you open.</p>
               <h4>AI models</h4>

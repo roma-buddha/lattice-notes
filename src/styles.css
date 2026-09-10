@@ -971,6 +971,25 @@ kbd {
   color: var(--muted);
   margin: 14px 0 24px;
 }
+.lotus-loading { gap: 10px; }
+.lotus-loading p { margin: 0; color: var(--muted); }
+.lotus-loading-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--accent);
+  font-size: 23px;
+  opacity: .82;
+  animation: lotus-loading-pulse 1.1s ease-in-out infinite alternate;
+}
+.lotus-loading-dots { display: inline-block; width: 1.1em; overflow: hidden; vertical-align: bottom; animation: lotus-loading-dots 1.2s steps(4, end) infinite; }
+@keyframes lotus-loading-pulse { from { opacity: .38; transform: scale(.92); } to { opacity: .9; transform: scale(1); } }
+@keyframes lotus-loading-dots { from { width: 0; } to { width: 1.1em; } }
+.reading-loading { padding: 28px; color: var(--muted); }
+.compact-titlebar .title-navigation,
+.detached-shell .title-navigation { flex: 0 0 auto; min-width: 112px; width: 112px; padding-left: 12px; }
+.compact-titlebar .title-brand { padding-right: 8px; }
 .error-banner {
   display: flex;
   align-items: center;

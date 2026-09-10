@@ -24,7 +24,7 @@ function parse(raw: string): NoteAppearance {
       widths: v.widths && typeof v.widths === "object" ? v.widths : {},
       alignment: ["left", "center", "right", "justify"].includes(v.alignment)
         ? v.alignment
-        : "left",
+        : "justify",
       highlights: Array.isArray(v.highlights)
         ? v.highlights.filter(
             (n: unknown) => Number.isInteger(n) && Number(n) >= 0,
@@ -33,7 +33,7 @@ function parse(raw: string): NoteAppearance {
     };
   } catch {
     return {
-      alignment: "left",
+      alignment: "justify",
       highlights: [],
       widths: {},
       textWidth: "comfortable",

@@ -32,6 +32,7 @@ export function TitleBar({
   split,
   tabContext,
   settings,
+  compact = false,
 }: {
   sidebar: boolean;
   toggleSidebar: () => void;
@@ -47,6 +48,7 @@ export function TitleBar({
   split: (button: HTMLElement) => void;
   tabContext: (id: number, event: React.MouseEvent) => void;
   settings: () => void;
+  compact?: boolean;
 }) {
   const [maximized, setMaximized] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -98,21 +100,21 @@ export function TitleBar({
     void action().catch((error) => onError(String(error)));
   };
   return (
-    <header className="unified-titlebar" data-tauri-drag-region>
+    <header className={`unified-titlebar ${compact ? "compact-titlebar" : ""}`}>
       <div className="title-navigation" data-tauri-drag-region>
         <span className="title-brand" data-tauri-drag-region>
           <img src={logo} alt="" data-tauri-drag-region />
           <span data-tauri-drag-region>Lotus</span>
         </span>
-        <button
+        {!compact && <button
           className="icon"
           aria-label={`${sidebar ? "Collapse" : "Expand"} sidebar (Ctrl+B)`}
           title="Toggle sidebar"
           onClick={toggleSidebar}
         >
           {sidebar ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}
-        </button>
-        <button
+        </button>}
+        {!compact && <button
           className="icon quick-theme"
           aria-label={
             theme === "light" ? "Switch to dark theme" : "Switch to light theme"
@@ -121,23 +123,23 @@ export function TitleBar({
           onClick={toggleTheme}
         >
           {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
-        </button>
-        <button
+        </button>}
+        {!compact && <button
           className="icon"
           aria-label="Split view"
           title="Split view"
           onClick={(e) => split(e.currentTarget)}
         >
           <Columns2 size={17} />
-        </button>
-        <button
+        </button>}
+        {!compact && <button
           className="icon"
           aria-label="Settings"
           title="Settings"
           onClick={settings}
         >
           <Settings size={17} />
-        </button>
+        </button>}
       </div>
       <div
         className={`tab-strip ${dragOver ? "tab-drop-target" : ""}`}
@@ -146,7 +148,6 @@ export function TitleBar({
           if (strip.current)
             strip.current.scrollLeft += event.deltaY || event.deltaX;
         }}
-        data-tauri-drag-region
         role="tablist"
         aria-label="Open notes"
         onDragOver={(event) => {
@@ -155,7 +156,7 @@ export function TitleBar({
             event.dataTransfer.types.includes("notus-note")
           ) {
             event.preventDefault();
-            event.dataTransfer.dropEffect = "move";
+            event.dataTransfer.dropEffect = event.dataTransfer.types.includes("notus-note") ? "copy" : "move";
             setDragOver(true);
           }
         }}

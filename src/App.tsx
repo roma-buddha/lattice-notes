@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import {
   insertNewlineContinueMarkup,
@@ -15,10 +15,8 @@ import { undo, undoDepth, indentWithTab } from "@codemirror/commands";
 import { exportSettings, importSettings } from "./portableSettings";
 import { AreaIcon } from "./AreaIcons";
 import { NoteSearch } from "./NoteSearch";
-import { MarkdownView } from "./MarkdownView";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, emitTo } from "@tauri-apps/api/event";
-import { AppSettings } from "./AppSettings";
 import { AIChat } from "./AIChat";
 import { editedBody, minimalChange, preserveNotePosition, type NoteContext } from "./ai";
 import {
@@ -31,7 +29,6 @@ import { useNoteAppearance, moveNoteAppearance } from "./noteAppearance";
 import { serializeTable, findTables } from "./core/tables";
 import { VaultSetup } from "./VaultSetup";
 import { VaultSwitcher } from "./VaultSwitcher";
-import { WorkspaceOrganizer } from "./WorkspaceOrganizer";
 import type { TabTransfer } from "./TitleBar";
 import {
   FolderOpen,
@@ -68,6 +65,17 @@ import { splitFrontmatter, relativeNoteLink } from "./core/markdown";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { NoteHeader } from "./NoteHeader";
 import { ContextMenu } from "./ContextMenu";
+
+// These panels are useful, but they should not delay the first usable Lotus window.
+const MarkdownView = lazy(() =>
+  import("./MarkdownView").then((module) => ({ default: module.MarkdownView })),
+);
+const AppSettings = lazy(() =>
+  import("./AppSettings").then((module) => ({ default: module.AppSettings })),
+);
+const WorkspaceOrganizer = lazy(() =>
+  import("./WorkspaceOrganizer").then((module) => ({ default: module.WorkspaceOrganizer })),
+);
 import { editorItems } from "./EditorMenu";
 import {
   codeTarget,
@@ -325,7 +333,7 @@ export default function App() {
   const [vaultSetup, setVaultSetup] = useState<"create" | "add" | null>(null);
   const [vaultSetupBusy, setVaultSetupBusy] = useState(false);
   const [fontFamily, setFontFamily] = useState(
-    () => storage.get("notus-font-family") || "Segoe UI",
+    () => storage.get("notus-font-family") || "Georgia",
   );
   useEffect(() => {
     storage.set("notus-font-family", fontFamily);
@@ -341,7 +349,7 @@ export default function App() {
   const [textPane, setTextPane] = useState<"primary" | "secondary">("primary");
   const [textPanel, setTextPanel] = useState<Anchor | null>(null);
   const [fontSize, setFontSize] = useState(() =>
-    Math.min(28, Math.max(12, Number(storage.get("notus-font-size")) || 16)),
+    Math.min(28, Math.max(12, Number(storage.get("notus-font-size")) || 15)),
   );
   const [fontWeight, setFontWeight] = useState(() =>
     [400, 500, 600, 700].includes(Number(storage.get("notus-font-weight")))
@@ -864,6 +872,28 @@ export default function App() {
   live.current = { save: saveAll, refresh, loadDocument, status };
   useEffect(() => {
     let cancelled = false;
+    const requestedNote = new URLSearchParams(window.location.search).get("note");
+    // A detached note needs no file tree or organiser. Reading it directly keeps
+    // the new window focused and avoids repeating the main workspace startup.
+    if (detached && requestedNote) {
+      void api
+        .read(requestedNote)
+        .then((note) => {
+          if (cancelled) return;
+          current.current.root = "detached";
+          tabSequence.current = 1;
+          setTabs([{ id: 1, path: note.path }]);
+          activeTabRef.current = 1;
+          setActiveTab(1);
+          live.current.loadDocument(note);
+          setSelected(note.path);
+        })
+        .catch((e) => !cancelled && setError(String(e)))
+        .finally(() => !cancelled && setLoading(false));
+      return () => {
+        cancelled = true;
+      };
+    }
     void api
       .snapshot()
       .then(async (next) => {
@@ -871,7 +901,11 @@ export default function App() {
         if(next.legacy_root) importSettings(exportSettings(next.legacy_root),next.legacy_root,next.root,false);
         current.current.root = next.root;
         setSnapshot(next);
-        setOrganizer(await api.organizer());
+        // Organiser metadata is not needed to render the normal note workspace.
+        // Fetch it independently so it never holds up initial interaction.
+        void api.organizer().then((value) => {
+          if (!cancelled) setOrganizer(value);
+        }).catch(() => {});
         // Launch into a clean workspace. Vaults and the last note are not
         // restored until the user explicitly chooses a vault or note.
         setVaultPath("");
@@ -1820,7 +1854,7 @@ export default function App() {
 
   return (
     <div
-      className={`shell ${sidebar ? "" : "collapsed"}`}
+      className={`shell ${sidebar && !detached ? "" : "collapsed"} ${detached ? "detached-shell" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
     >
       <a className="skip-link" href="#editor-workspace">
@@ -1855,8 +1889,9 @@ export default function App() {
         theme={theme}
         toggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
         onError={setError}
+        compact={detached}
       />
-      {sidebar && (
+      {sidebar && !detached && (
         <aside className="sidebar">
           <div
             className="sidebar-resizer"
@@ -2154,11 +2189,12 @@ export default function App() {
         )}
         <main id="editor-workspace" tabIndex={-1}>
           {loading ? (
-            <div className="empty-note">
-              <p>Opening your workspace…</p>
+            <div className="empty-note lotus-loading" role="status" aria-live="polite">
+              <span className="lotus-loading-mark" aria-hidden="true">✦</span>
+              <p>Opening Lotus<span className="lotus-loading-dots" aria-hidden="true">…</span></p>
             </div>
           ) : organizerActive ? (
-            <WorkspaceOrganizer
+            <Suspense fallback={<div className="empty-note"><p>Opening workspace…</p></div>}><WorkspaceOrganizer
               entries={snapshot.entries}
               createVault={() => showCreate("vault")}
               state={organizer}
@@ -2168,7 +2204,7 @@ export default function App() {
               move={move}
               open={openNote}
               actions={showActions}
-            />
+            /></Suspense>
           ) : doc ? (
             <section className="note-view">
               <div className="note-ai-layout">
@@ -2337,12 +2373,12 @@ export default function App() {
                         }}
                       />
                     ) : (
-                      <MarkdownView
+                      <Suspense fallback={<div className="reading-loading" aria-live="polite">Preparing preview…</div>}><MarkdownView
                         content={splitFrontmatter(draft).body}
                         identity={`${snapshot.root}:${doc?.path}`}
                         appearance={appearance}
                         openLink={(href) => run(() => openLink(href))}
-                      />
+                      /></Suspense>
                     )}
                   </div>
                 </section>
@@ -2556,12 +2592,12 @@ export default function App() {
                             }}
                           />
                         ) : (
-                          <MarkdownView
+                          <Suspense fallback={<div className="reading-loading" aria-live="polite">Preparing preview…</div>}><MarkdownView
                             content={splitFrontmatter(secondaryValue).body}
                             identity={`${snapshot.root}:${secondaryDoc?.path}`}
                             appearance={secondaryAppearance}
                             openLink={(href) => run(() => openLink(href))}
-                          />
+                          /></Suspense>
                         )}
                       </div>
                     </section>
@@ -3395,7 +3431,7 @@ export default function App() {
                     }}
                   >
                     <FilePlus2 size={15} />
-                    Open in tab
+                    Open in new tab
                   </button>
                   <button
                     role="menuitem"
@@ -3408,7 +3444,7 @@ export default function App() {
                     }}
                   >
                     <FolderOpen size={15} />
-                    Open in separate window
+                    Open in new window
                   </button>
                 </>
               )}
@@ -3515,7 +3551,7 @@ export default function App() {
         </Modal>
       )}
       {settings && (
-        <AppSettings
+        <Suspense fallback={null}><AppSettings
           initialTab={aiSettings ? "AI models" : undefined}
           root={snapshot.root}
           beforeTransfer={saveAll}
@@ -3524,7 +3560,7 @@ export default function App() {
           onClose={() => { setSettings(false); setAiSettings(false); }}
           changeRoot={changeRoot}
           refresh={refresh}
-        />
+        /></Suspense>
       )}
       {notice && (
         <div className="toast" role="status">
