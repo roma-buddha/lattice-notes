@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, Plus, Send, Square, Settings2 } from "lucide-react";
+import { Sparkles, X, Send, Square, Settings2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -199,21 +199,6 @@ export function AIChat({
         </button>
         <button
           className="icon"
-          title="New chat"
-          aria-label="New chat"
-          disabled={busy || applying}
-          onClick={() => {
-            setMessages([]);
-            setProposal(null);
-            setError("");
-            setStatus("");
-            setInput("");
-          }}
-        >
-          <Plus size={17} />
-        </button>
-        <button
-          className="icon"
           aria-label="Close AI assistant"
           onClick={() => {
             if (busy) stop();
@@ -268,17 +253,6 @@ export function AIChat({
         </section>
       )}
       <div className="ai-conversation" ref={conversation} aria-live="polite">
-        {!messages.length && (
-          <div className="ai-empty">
-            <Sparkles size={24} />
-            <h3>What would you like to work on?</h3>
-            <p>Ask a question, summarize a note, or suggest an edit.</p>
-            <p className="muted">
-              Chats last while this workspace view is open. Nothing is sent
-              until you press Send.
-            </p>
-          </div>
-        )}
         {messages.map((m, i) => (
           <article key={i} className={`ai-message ${m.role}`}>
             <small>{m.role === "user" ? "You" : "Assistant"}</small>

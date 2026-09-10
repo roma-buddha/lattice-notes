@@ -6,6 +6,7 @@ import {
   Clock,
   Lock,
   LockOpen,
+  Sparkles,
   Undo2,
   Type,
   X,
@@ -26,6 +27,7 @@ export function NoteHeader({
   drop,
   rename,
   close,
+  ai,
 }: {
   note: Document;
   status: string;
@@ -38,6 +40,7 @@ export function NoteHeader({
   drop: (path: string) => void;
   rename: (name: string) => Promise<void>;
   close?: () => void;
+  ai: () => void;
 }) {
   const [over, setOver] = useState(false);
   const [name, setName] = useState(stem(note.path));
@@ -183,6 +186,14 @@ export function NoteHeader({
             onClick={lock}
           >
             {note.locked ? <Lock size={15} /> : <LockOpen size={15} />}
+          </button>
+          <button
+            className="icon"
+            aria-label="Open AI assistant"
+            title="AI assistant"
+            onClick={ai}
+          >
+            <Sparkles size={16} />
           </button>
           <span
             role="status"

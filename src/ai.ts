@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EditorView } from "@codemirror/view";
-export type Provider = "groq" | "openrouter" | "google" | "nvidia" | "custom" | "ollama" | "local";
+export type Provider = "groq" | "openrouter" | "google" | "nvidia" | "custom" | "ollama" | "lotus" | "local";
 export const providerNames: Record<Provider, string> = {
   groq: "Groq",
   openrouter: "OpenRouter",
@@ -8,6 +8,7 @@ export const providerNames: Record<Provider, string> = {
   nvidia: "NVIDIA",
   custom: "Custom provider",
   ollama: "Ollama",
+  lotus: "Lotus local runtime",
   local: "Local server",
 };
 export type Connection = {
@@ -16,6 +17,17 @@ export type Connection = {
   name?: string;
   base_url?: string;
   source?: "api" | "ollama" | "local";
+};
+export type ModelLibrary = { default_root: string; roots: string[] };
+export type LibraryFile = { name: string; path: string; relative_path: string; root: string; size: number; modified: number };
+export type ComputerSpecs = {
+  system: string;
+  cpu: string;
+  cores: number;
+  ram_bytes: number;
+  available_ram_bytes: number;
+  gpus: { name: string; vram_bytes: number }[];
+  library_free_bytes: number;
 };
 export const connectionName = (connection: Connection) =>
   connection.name || providerNames[connection.provider];
@@ -44,10 +56,22 @@ export const ai = {
   remove: (provider: Provider) => invoke<void>("ai_remove", { provider }),
   ollamaModels: () => invoke<{ name: string; size: number }[]>("ai_ollama_models"),
   saveOllama: (model: string) => invoke<void>("ai_save_ollama", { model }),
+  importOllama: (path: string, name: string) => invoke<string>("ai_import_ollama", { path, name }),
+  runLotus: (path: string) => invoke<string>("ai_run_lotus", { path }),
+  stopLotus: () => invoke<void>("ai_stop_lotus"),
   deleteOllama: (model: string) => invoke<void>("ai_delete_ollama", { model }),
+  computerSpecs: () => invoke<ComputerSpecs>("ai_computer_specs"),
+  library: () => invoke<ModelLibrary>("model_library"),
+  chooseModelRoot: () => invoke<ModelLibrary | null>("model_library_choose_root"),
+  addModelRoot: () => invoke<ModelLibrary | null>("model_library_add_root"),
+  libraryFiles: () => invoke<LibraryFile[]>("model_library_files"),
+  revealModel: (path: string) => invoke<void>("model_library_reveal", { path }),
+  renameModel: (path: string, name: string) => invoke<LibraryFile>("model_library_rename", { path, name }),
+  moveModel: (path: string, targetRoot: string) => invoke<LibraryFile>("model_library_move", { path, targetRoot }),
+  deleteModel: (path: string) => invoke<void>("model_library_delete", { path }),
   hfSearch: (query: string) => invoke<{ id: string; downloads: number; likes: number }[]>("hf_search", { query }),
   hfFiles: (repository: string) => invoke<{ path: string; size: number }[]>("hf_files", { repository }),
-  hfDownloadImport: (repository: string, file: string, name: string) => invoke<void>("hf_download_import", { repository, file, name }),
+  hfDownload: (repository: string, file: string, destinationName: string) => invoke<void>("hf_download", { repository, file, destinationName }),
   hfCancel: () => invoke<void>("hf_cancel"),
   chat: (
     provider: Provider,

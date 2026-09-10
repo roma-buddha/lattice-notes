@@ -21,7 +21,6 @@ import { listen, emitTo } from "@tauri-apps/api/event";
 import { AppSettings } from "./AppSettings";
 import { AIChat } from "./AIChat";
 import { editedBody, minimalChange, preserveNotePosition, type NoteContext } from "./ai";
-import { Sparkles } from "lucide-react";
 import {
   tableEditing,
   tableHighlights,
@@ -48,6 +47,7 @@ import {
   FilePlus2,
   Settings,
   EyeOff,
+  ChevronsUpDown,
 } from "lucide-react";
 import { SidebarTree, InlineName } from "./SidebarTree";
 import { anchorAt, type Anchor, type InlineEdit } from "./sidebarTypes";
@@ -1117,23 +1117,33 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    let lastFolderTarget = "";
     const folderAt = (position: { x: number; y: number }) => {
-      // Tauri supplies physical pixels; DOM hit testing uses CSS pixels.
+      // Tauri can report physical pixels on high-DPI Windows displays, while
+      // DOM hit testing is in CSS pixels. Try both so an external Explorer
+      // drag reliably finds closed and expanded folder rows.
       const scale = window.devicePixelRatio || 1;
-      const row = document
-        .elementFromPoint(position.x / scale, position.y / scale)
-        ?.closest<HTMLElement>(".tree-row.kind-folder[data-path]");
-      return row?.dataset.path ?? "";
+      for (const [x, y] of [[position.x, position.y], [position.x / scale, position.y / scale]]) {
+        const row = document.elementsFromPoint(x, y).find((element) =>
+          element.matches(".tree-row.kind-folder[data-path]") ||
+          !!element.closest(".tree-row.kind-folder[data-path]"),
+        )?.closest<HTMLElement>(".tree-row.kind-folder[data-path]");
+        if (row?.dataset.path) return row.dataset.path;
+      }
+      return "";
     };
     void getCurrentWindow()
       .onDragDropEvent((event) => {
         if (event.payload.type === "leave") {
+          lastFolderTarget = "";
           setExternalDropTarget("");
           return;
         }
-        const target = folderAt(event.payload.position);
+        const target = folderAt(event.payload.position) || lastFolderTarget;
+        if (target) lastFolderTarget = target;
         setExternalDropTarget(target);
         if (event.payload.type !== "drop") return;
+        lastFolderTarget = "";
         setExternalDropTarget("");
         const sources = event.payload.paths.filter((path) => /\.(md|markdown)$/i.test(path));
         if (!target || !sources.length) {
@@ -1925,6 +1935,21 @@ export default function App() {
             >
               <FolderTree size={18} />
             </button>
+            <button
+              className="icon"
+              title={collapsed.size ? "Expand all folders" : "Collapse all folders"}
+              aria-label={collapsed.size ? "Expand all folders" : "Collapse all folders"}
+              aria-pressed={collapsed.size > 0}
+              onClick={() => {
+                if (collapsed.size) {
+                  setCollapsed(new Set());
+                  return;
+                }
+                setCollapsed(new Set(flatten(activeVault?.children ?? []).filter((entry) => entry.kind === "folder").map((entry) => entry.path)));
+              }}
+            >
+              <ChevronsUpDown size={18} />
+            </button>
           </nav>
           <div className="files-toolbar">
             <span>
@@ -2170,9 +2195,9 @@ export default function App() {
                       })
                     }
                     rename={(name) => renameNote(doc.path, name)}
+                    ai={() => { setAiPane("primary"); preserveNotePosition([editorView.current, secondaryEditor.current], () => setAiOpen(true)); }}
                     close={splitView ? () => run(closePrimaryPane) : undefined}
                   />
-                  <div className="ai-launch-row"><button className="icon ai-launch" aria-label="Open AI assistant" title="AI assistant" aria-expanded={aiOpen} onClick={() => { setAiPane("primary"); preserveNotePosition([editorView.current, secondaryEditor.current], () => setAiOpen(true)); }}><Sparkles size={18} /></button></div>
                   <div
                     className="document-scroll primary-pane"
                     onFocusCapture={() => setActivePane("primary")}
@@ -2421,9 +2446,9 @@ export default function App() {
                         }
                         drop={(path) => run(() => openSecondary(path))}
                         rename={(name) => renameNote(secondaryNote.path, name)}
+                        ai={() => { setAiPane("secondary"); preserveNotePosition([editorView.current, secondaryEditor.current], () => setAiOpen(true)); }}
                         close={() => run(closeSplit)}
                       />
-                      <div className="ai-launch-row"><button className="icon ai-launch" aria-label="Open AI assistant for second note" title="AI assistant" aria-expanded={aiOpen} onClick={() => { setAiPane("secondary"); preserveNotePosition([editorView.current, secondaryEditor.current], () => setAiOpen(true)); }}><Sparkles size={18} /></button></div>
                       <div
                         className="document-scroll secondary-pane"
                         style={

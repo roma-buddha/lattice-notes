@@ -137,7 +137,6 @@ pub async fn detach_note(
             .inner_size(920.0, 720.0)
             .min_inner_size(680.0, 520.0)
             .decorations(false)
-            .disable_drag_drop_handler()
             .visible(false)
             .build()
             .map_err(|e| e.to_string())?;
@@ -179,7 +178,6 @@ pub async fn focus_main(
             .inner_size(1280.0, 840.0)
             .min_inner_size(680.0, 520.0)
             .decorations(false)
-            .disable_drag_drop_handler()
             .build()
             .map_err(|e| e.to_string())?;
         Ok(true)

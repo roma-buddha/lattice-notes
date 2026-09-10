@@ -20,6 +20,7 @@ export function MermaidDiagram({
   const [size, setSize] = useState({ width: 1, height: 1 });
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
   const viewport = useRef<HTMLDivElement>(null);
+  const diagram = useRef<HTMLElement>(null);
   const [available, setAvailable] = useState({ width: 1, height: 1 });
   const key = `lotus-diagram:${preferenceKey}`;
   useEffect(() => {
@@ -129,7 +130,7 @@ export function MermaidDiagram({
     Math.min(available.width / size.width, available.height / size.height, 1) *
     zoom;
   return (
-    <section className="mermaid-diagram" aria-label="Mermaid diagram">
+    <section ref={diagram} className="mermaid-diagram" aria-label="Mermaid diagram">
       <div className="diagram-toolbar">
         <button
           className="icon"
@@ -149,12 +150,9 @@ export function MermaidDiagram({
         </button>
         <button
           className="icon"
-          title="Fit diagram"
-          aria-label="Fit diagram"
-          onClick={() => {
-            changeZoom(1);
-            viewport.current?.scrollTo(0, 0);
-          }}
+          title="Expand diagram"
+          aria-label="Expand diagram"
+          onClick={() => void diagram.current?.requestFullscreen?.()}
         >
           <Maximize2 size={15} />
         </button>
