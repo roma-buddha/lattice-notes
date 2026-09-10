@@ -29,6 +29,7 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
+    "resources": ["resources/llama"],
     "shortDescription": "A quiet place for your notes.",
     "category": "Productivity",
     "windows": {

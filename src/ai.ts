@@ -1,13 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EditorView } from "@codemirror/view";
-export type Provider = "groq" | "openrouter" | "google" | "nvidia" | "custom" | "ollama" | "lotus" | "local";
+export type Provider = "groq" | "openrouter" | "google" | "nvidia" | "custom" | "lotus" | "local";
 export const providerNames: Record<Provider, string> = {
   groq: "Groq",
   openrouter: "OpenRouter",
   google: "Google Gemini",
   nvidia: "NVIDIA",
   custom: "Custom provider",
-  ollama: "Ollama",
   lotus: "Lotus local runtime",
   local: "Local server",
 };
@@ -16,7 +15,7 @@ export type Connection = {
   model: string;
   name?: string;
   base_url?: string;
-  source?: "api" | "ollama" | "local";
+  source?: "api" | "local";
 };
 export type ModelLibrary = { default_root: string; roots: string[] };
 export type LibraryFile = { name: string; path: string; relative_path: string; root: string; size: number; modified: number };
@@ -27,7 +26,8 @@ export type ComputerSpecs = {
   ram_bytes: number;
   available_ram_bytes: number;
   gpus: { name: string; vram_bytes: number }[];
-  library_free_bytes: number;
+  drive_bytes: number;
+  drive_free_bytes: number;
 };
 export const connectionName = (connection: Connection) =>
   connection.name || providerNames[connection.provider];
@@ -54,13 +54,9 @@ export const ai = {
     baseUrl = "",
   ) => invoke<void>("ai_save", { provider, key, model, name, baseUrl }),
   remove: (provider: Provider) => invoke<void>("ai_remove", { provider }),
-  ollamaModels: () => invoke<{ name: string; size: number }[]>("ai_ollama_models"),
-  saveOllama: (model: string) => invoke<void>("ai_save_ollama", { model }),
-  importOllama: (path: string, name: string) => invoke<string>("ai_import_ollama", { path, name }),
   runLotus: (path: string) => invoke<string>("ai_run_lotus", { path }),
   stopLotus: () => invoke<void>("ai_stop_lotus"),
-  deleteOllama: (model: string) => invoke<void>("ai_delete_ollama", { model }),
-  computerSpecs: () => invoke<ComputerSpecs>("ai_computer_specs"),
+  computerSpecs: (refresh = false) => invoke<ComputerSpecs>("ai_computer_specs", { refresh }),
   library: () => invoke<ModelLibrary>("model_library"),
   chooseModelRoot: () => invoke<ModelLibrary | null>("model_library_choose_root"),
   addModelRoot: () => invoke<ModelLibrary | null>("model_library_add_root"),

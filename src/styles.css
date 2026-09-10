@@ -2730,9 +2730,13 @@ dialog form > label {
 .app-settings .settings-content { min-width:0; min-height:0; height:100%; box-sizing:border-box; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:20px 20px 32px; }
 .model-browser { position:fixed; box-sizing:border-box; left:calc(var(--sidebar-width, 272px) + 688px); top:max(16px, calc((100dvh - 640px) / 2)); width:400px; height:640px; max-height:calc(100dvh - 32px); display:flex; flex-direction:column; z-index:3; overflow:hidden; background:var(--sidebar); color:var(--ink); border:1px solid var(--line); border-radius:9px; box-shadow:0 20px 70px #0004; }
 .model-browser > header { display:flex; align-items:center; justify-content:space-between; min-height:54px; padding:0 16px; border-bottom:1px solid var(--line); }
+.back-button { padding:6px 0; color:var(--ink); font-weight:600; }
 .model-browser-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:10px; }
 .model-browser-list > button { display:flex; width:100%; align-items:flex-start; gap:8px; padding:10px; border-radius:6px; text-align:left; overflow-wrap:anywhere; }
 .model-browser-list > button > span:last-child { display:flex; min-width:0; flex-direction:column; gap:4px; }
+.hf-model-row { display:grid !important; grid-template-columns:20px minmax(0,1fr); column-gap:10px; align-items:start !important; }
+.hf-model-row .model-fit { grid-column:1; grid-row:1 / span 2; margin-top:3px; }
+.hf-model-row > span:last-child { grid-column:2; align-items:flex-start; text-align:left; }
 .model-browser-list > button.selected { background:var(--soft); color:var(--accent); }
 .model-browser-list small,.library-file small { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
 .model-fit { display:inline-flex; flex:0 0 auto; margin-top:2px; color:var(--muted); }

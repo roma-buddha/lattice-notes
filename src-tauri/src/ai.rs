@@ -30,12 +30,10 @@ pub struct Connection {
     source: String,
 }
 #[derive(Serialize)]
-pub struct LocalModel { pub name: String, pub size: u64 }
-#[derive(Serialize)]
 pub struct HfModel { pub id: String, pub downloads: u64, pub likes: u64 }
 #[derive(Serialize)]
 pub struct HfFile { pub path: String, pub size: u64 }
-#[derive(Serialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct ComputerSpecs {
     pub system: String,
     pub cpu: String,
@@ -43,9 +41,10 @@ pub struct ComputerSpecs {
     pub ram_bytes: u64,
     pub available_ram_bytes: u64,
     pub gpus: Vec<GpuSpecs>,
-    pub library_free_bytes: u64,
+    pub drive_bytes: u64,
+    pub drive_free_bytes: u64,
 }
-#[derive(Serialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct GpuSpecs { pub name: String, pub vram_bytes: u64 }
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct ModelLibrary {
@@ -93,14 +92,13 @@ fn base(provider: &str) -> Result<&'static str, String> {
     }
 }
 fn entry(provider: &str) -> Result<keyring::Entry, String> {
-    if !["custom", "local", "ollama", "lotus"].contains(&provider) {
+    if !["custom", "local", "lotus"].contains(&provider) {
         base(provider)?;
     }
     keyring::Entry::new("app.lotus.ai", provider)
         .map_err(|_| "Windows credential storage is unavailable.".into())
 }
 fn endpoint(provider: &str, custom: &str) -> Result<String, String> {
-    if provider == "ollama" { return Ok("http://127.0.0.1:11434/v1".into()); }
     if provider == "lotus" { return Ok("http://127.0.0.1:8081/v1".into()); }
     if provider != "custom" {
         if provider == "local" { return local_endpoint(custom); }
@@ -141,7 +139,7 @@ fn local_endpoint(raw: &str) -> Result<String, String> {
     Ok(url.to_string().trim_end_matches('/').into())
 }
 fn connection_key(provider: &str, key: &str, destination: &str) -> Result<String, String> {
-    if ["ollama", "lotus"].contains(&provider) || (provider == "local" && key.trim().is_empty()) { return Ok(String::new()); }
+    if provider == "lotus" || (provider == "local" && key.trim().is_empty()) { return Ok(String::new()); }
     let value = key.trim();
     if !value.is_empty() {
         if value.len() > 1024 || value.chars().any(char::is_control) {
@@ -226,7 +224,7 @@ async fn models(provider: &str, key: &str, destination: &str) -> Result<Vec<Stri
 #[tauri::command]
 pub fn ai_connections() -> Result<Vec<Connection>, String> {
     let mut result = Vec::new();
-    for provider in ["groq", "openrouter", "google", "nvidia", "custom", "ollama", "lotus", "local"] {
+    for provider in ["groq", "openrouter", "google", "nvidia", "custom", "lotus", "local"] {
         match entry(provider)?.get_password() {
             Ok(raw) => {
                 let value: Secret =
@@ -236,7 +234,7 @@ pub fn ai_connections() -> Result<Vec<Connection>, String> {
                     model: value.model,
                     name: value.name,
                     base_url: endpoint(provider, &value.base_url)?,
-                    source: if provider == "ollama" { "ollama" } else if ["local", "lotus"].contains(&provider) { "local" } else { "api" }.into(),
+                    source: if ["local", "lotus"].contains(&provider) { "local" } else { "api" }.into(),
                 });
             }
             Err(keyring::Error::NoEntry) => {}
@@ -245,52 +243,7 @@ pub fn ai_connections() -> Result<Vec<Connection>, String> {
     }
     Ok(result)
 }
-#[tauri::command]
-pub async fn ai_ollama_models() -> Result<Vec<LocalModel>, String> {
-    let data = response(client()?.get("http://127.0.0.1:11434/api/tags").send().await.map_err(|_| "Ollama is not running. Start Ollama, then try again.")?).await?;
-    let mut result: Vec<LocalModel> = data["models"].as_array().ok_or("Ollama did not return a model list.")?.iter().filter_map(|model| Some(LocalModel { name: model["name"].as_str()?.to_string(), size: model["size"].as_u64().unwrap_or(0) })).collect();
-    result.sort_by(|a,b| a.name.cmp(&b.name));
-    Ok(result)
-}
-#[tauri::command]
-pub async fn ai_save_ollama(model: String) -> Result<(), String> {
-    let available = ai_ollama_models().await?;
-    let model = model.trim();
-    if !available.iter().any(|item| item.name == model) { return Err("Choose an installed Ollama model.".into()); }
-    entry("ollama")?.set_password(&serde_json::to_string(&Secret { key: String::new(), model: model.into(), name: "Ollama".into(), base_url: "http://127.0.0.1:11434/v1".into() }).map_err(|_| "Cannot save local model.")?).map_err(|_| "Could not save the local model connection.".into())
-}
-fn safe_ollama_name(value: &str) -> Result<String, String> {
-    let name = value.trim().to_ascii_lowercase();
-    if name.is_empty() || name.len() > 96 || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')) {
-        return Err("Use a model name with letters, numbers, dots, dashes, underscores, or a tag colon.".into());
-    }
-    Ok(name)
-}
-/// Register an approved GGUF file with Ollama. The model remains in the user's
-/// chosen library; Ollama owns only its runtime registration and cache.
-#[tauri::command]
-pub async fn ai_import_ollama(app: tauri::AppHandle, path: String, name: String) -> Result<String, String> {
-    let (file, _) = approved_file(&app, &path)?;
-    let name = safe_ollama_name(&name)?;
-    let modelfile = format!("FROM {}", file.to_string_lossy());
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30 * 60))
-        .connect_timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|_| "Could not start Ollama import.")?;
-    let response = client
-        .post("http://127.0.0.1:11434/api/create")
-        .json(&json!({"name": name, "modelfile": modelfile, "stream": false}))
-        .send()
-        .await
-        .map_err(|_| "Ollama is not running. Start Ollama, then try again.")?;
-    if !response.status().is_success() {
-        return Err("Ollama could not load this GGUF file. Check that the file is complete and compatible.".into());
-    }
-    Ok(name)
-}
-/// Start a GGUF in the optional Lotus llama.cpp-compatible runtime. This is
-/// deliberately separate from Ollama: no model is copied or registered there.
+/// Start a GGUF in the Lotus-managed llama.cpp-compatible local runtime.
 #[tauri::command]
 pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String, String> {
     let (file, _) = approved_file(&app, &path)?;
@@ -301,12 +254,13 @@ pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String,
                 return Err("A Lotus local model is already running. Stop it before loading another model.".into());
             }
         }
-        let bundled = app.path().app_config_dir().map_err(|_| "Cannot locate Lotus settings.")?.join("runtime").join("llama-server.exe");
-        let executable = if bundled.is_file() { bundled } else { PathBuf::from("llama-server.exe") };
-        let child = Command::new(&executable)
-            .args(["--model", &file.to_string_lossy(), "--host", "127.0.0.1", "--port", "8081", "--ctx-size", "2048", "--n-gpu-layers", "0"])
-            .spawn()
-            .map_err(|_| "Lotus local runtime is not installed. Install the optional Lotus runtime (llama-server.exe), then try again.")?;
+        let executable = app.path().resource_dir().map_err(|_| "Lotus local runtime is unavailable.")?.join("resources").join("llama").join("llama-server.exe");
+        if !executable.is_file() { return Err("Lotus local runtime is unavailable. Reinstall Lotus and try again.".into()); }
+        let mut command = Command::new(&executable);
+        command.args(["--model", &file.to_string_lossy(), "--host", "127.0.0.1", "--port", "8081", "--ctx-size", "2048", "--n-gpu-layers", "0"]);
+        #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
+        let child = command.spawn()
+            .map_err(|_| "Lotus could not start its local runtime.")?;
         *guard = Some(child);
     }
     let destination = endpoint("lotus", "")?;
@@ -415,10 +369,14 @@ pub fn model_library_files(app: tauri::AppHandle) -> Result<Vec<LibraryFile>, St
     Ok(output)
 }
 #[tauri::command]
-pub fn ai_computer_specs(app: tauri::AppHandle) -> Result<ComputerSpecs, String> {
+pub fn ai_computer_specs(app: tauri::AppHandle, refresh: Option<bool>) -> Result<ComputerSpecs, String> {
+    let cache = app.path().app_config_dir().map_err(|_| "Cannot locate Lotus settings.")?.join("computer-specs.json");
+    if !refresh.unwrap_or(false) { if let Ok(bytes) = fs::read(&cache) {
+        if let Ok(saved) = serde_json::from_slice::<ComputerSpecs>(&bytes) { return Ok(saved); }
+    } }
     // CIM is Windows' supported local inventory API. It reads only this machine
     // and its output is never placed in vaults or sent to a model provider.
-    let script = "$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1; $os=Get-CimInstance Win32_OperatingSystem; $gpu=@(Get-CimInstance Win32_VideoController|ForEach-Object {[pscustomobject]@{name=$_.Name;vram=[uint64]$_.AdapterRAM}}); [pscustomobject]@{system=$os.Caption;cpu=$cpu.Name;cores=[uint32]$cpu.NumberOfLogicalProcessors;ram_bytes=[uint64]$os.TotalVisibleMemorySize*1024;available_ram_bytes=[uint64]$os.FreePhysicalMemory*1024;gpus=$gpu}|ConvertTo-Json -Compress -Depth 3";
+    let script = "$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1; $os=Get-CimInstance Win32_OperatingSystem; $gpu=@(Get-CimInstance Win32_VideoController|ForEach-Object {[pscustomobject]@{name=$_.Name;vram=[uint64]$_.AdapterRAM}}); $drive=Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID=\"C:\"'; [pscustomobject]@{system=$os.Caption;cpu=$cpu.Name;cores=[uint32]$cpu.NumberOfLogicalProcessors;ram_bytes=[uint64]$os.TotalVisibleMemorySize*1024;available_ram_bytes=[uint64]$os.FreePhysicalMemory*1024;drive_bytes=[uint64]$drive.Size;drive_free_bytes=[uint64]$drive.FreeSpace;gpus=$gpu}|ConvertTo-Json -Compress -Depth 3";
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
@@ -427,11 +385,12 @@ pub fn ai_computer_specs(app: tauri::AppHandle) -> Result<ComputerSpecs, String>
     #[derive(Deserialize)]
     struct RawGpu { #[serde(default)] name: String, #[serde(default)] vram: u64 }
     #[derive(Deserialize)]
-    struct RawSpecs { #[serde(default)] system: String, #[serde(default)] cpu: String, #[serde(default)] cores: u32, #[serde(default)] ram_bytes: u64, #[serde(default)] available_ram_bytes: u64, #[serde(default)] gpus: Vec<RawGpu> }
+    struct RawSpecs { #[serde(default)] system: String, #[serde(default)] cpu: String, #[serde(default)] cores: u32, #[serde(default)] ram_bytes: u64, #[serde(default)] available_ram_bytes: u64, #[serde(default)] drive_bytes: u64, #[serde(default)] drive_free_bytes: u64, #[serde(default)] gpus: Vec<RawGpu> }
     let raw: RawSpecs = serde_json::from_slice(&output.stdout).map_err(|_| "Windows returned incomplete hardware information.")?;
-    let library = load_library(&app)?;
-    let library_free_bytes = if library.default_root.is_empty() { 0 } else { fs2::available_space(&library.default_root).unwrap_or(0) };
-    Ok(ComputerSpecs { system: raw.system, cpu: raw.cpu, cores: raw.cores, ram_bytes: raw.ram_bytes, available_ram_bytes: raw.available_ram_bytes, gpus: raw.gpus.into_iter().map(|gpu| GpuSpecs { name: gpu.name, vram_bytes: gpu.vram }).collect(), library_free_bytes })
+    let specs = ComputerSpecs { system: raw.system, cpu: raw.cpu, cores: raw.cores, ram_bytes: raw.ram_bytes, available_ram_bytes: raw.available_ram_bytes, drive_bytes: raw.drive_bytes, drive_free_bytes: raw.drive_free_bytes, gpus: raw.gpus.into_iter().map(|gpu| GpuSpecs { name: gpu.name, vram_bytes: gpu.vram }).collect() };
+    if let Some(parent) = cache.parent() { let _ = fs::create_dir_all(parent); }
+    let _ = fs::write(cache, serde_json::to_vec(&specs).unwrap_or_default());
+    Ok(specs)
 }
 #[tauri::command]
 pub fn model_library_reveal(app: tauri::AppHandle, path: String) -> Result<(), String> {
@@ -541,13 +500,6 @@ pub async fn hf_download(
 #[tauri::command]
 pub fn hf_cancel(window: tauri::WebviewWindow) {
     if let Ok(active) = downloads().lock() { if let Some(sender) = active.get(window.label()) { let _ = sender.send(true); } }
-}
-#[tauri::command]
-pub async fn ai_delete_ollama(model: String) -> Result<(), String> {
-    let result = client()?.delete(format!("http://127.0.0.1:11434/api/delete")).json(&json!({"name":model})).send().await.map_err(|_| "Ollama is not running.")?;
-    if !result.status().is_success() { return Err("Ollama could not delete that model.".into()); }
-    if secret("ollama").is_ok_and(|saved| saved.model == model) { let _ = entry("ollama")?.delete_credential(); }
-    Ok(())
 }
 #[tauri::command]
 pub async fn ai_models(

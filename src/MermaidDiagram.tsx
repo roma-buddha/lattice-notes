@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { ZoomIn, ZoomOut, Maximize2, Code2 } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, Code2 } from "lucide-react";
 let serial = 0;
 let queue: Promise<unknown> = Promise.resolve();
 export function MermaidDiagram({
@@ -22,6 +22,7 @@ export function MermaidDiagram({
   const viewport = useRef<HTMLDivElement>(null);
   const diagram = useRef<HTMLElement>(null);
   const [available, setAvailable] = useState({ width: 1, height: 1 });
+  const [expanded, setExpanded] = useState(false);
   const key = `lotus-diagram:${preferenceKey}`;
   useEffect(() => {
     const observer = new MutationObserver(() =>
@@ -117,6 +118,11 @@ export function MermaidDiagram({
     observer.observe(el);
     return () => observer.disconnect();
   }, [key, editing]);
+  useEffect(() => {
+    const update = () => setExpanded(document.fullscreenElement === diagram.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
   const changeZoom = (value: number) => {
     setZoom(value);
     try {
@@ -150,11 +156,11 @@ export function MermaidDiagram({
         </button>
         <button
           className="icon"
-          title="Expand diagram"
-          aria-label="Expand diagram"
-          onClick={() => void diagram.current?.requestFullscreen?.()}
+          title={expanded ? "Shrink diagram" : "Expand diagram"}
+          aria-label={expanded ? "Shrink diagram" : "Expand diagram"}
+          onClick={() => void (expanded ? document.exitFullscreen?.() : diagram.current?.requestFullscreen?.())}
         >
-          <Maximize2 size={15} />
+          {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
         </button>
         {onChange && (
           <button
