@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, Send, Square, Settings2 } from "lucide-react";
+import { Sparkles, X, Send, Square, Settings2, Trash2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -83,6 +83,16 @@ export function AIChat({
     generation.current++;
     void ai.stop().catch((e) => setError(String(e)));
     setStatus("Stopping…");
+  };
+  const clearChat = () => {
+    if (busy) stop();
+    generation.current++;
+    setMessages([]);
+    setProposal(null);
+    setError("");
+    setStatus("");
+    setInput("");
+    requestAnimationFrame(() => composer.current?.focus());
   };
   const send = async () => {
     if (!input.trim() || busy || applying || !connections.length)
@@ -375,7 +385,7 @@ export function AIChat({
             </button>
           ) : (
             <button
-              className="primary"
+              className="ai-send-button"
               disabled={
                 !input.trim() || !connections.length || applying
               }
@@ -386,6 +396,9 @@ export function AIChat({
             </button>
           )}
         </div>
+        <button className="ai-clear-chat" type="button" disabled={!messages.length && !proposal && !error && !status} onClick={clearChat}>
+          <Trash2 size={13} /> Clear chat
+        </button>
         {status && <p role="status">{status}</p>}
         {error && (
           <p role="alert" className="ai-error">

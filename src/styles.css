@@ -57,6 +57,11 @@
 .ai-send small { font-size:11px; color:var(--muted); }
 .ai-quick-controls { display:flex; gap:5px; min-width:0; }
 .ai-quick-controls select { min-height:28px; padding:3px 22px 3px 7px; font-size:11px; }
+.ai-send-button { min-height:30px; padding:4px 6px; border:0; border-radius:5px; background:transparent; color:var(--accent); box-shadow:none; }
+.ai-send-button:hover:not(:disabled) { background:var(--soft); }
+.ai-send-button:disabled { background:transparent; color:var(--muted); }
+.ai-clear-chat { display:inline-flex; align-items:center; gap:5px; min-height:24px; margin-top:7px; padding:2px 0; color:var(--muted); font-size:11px; }
+.ai-clear-chat:hover:not(:disabled) { color:var(--ink); }
 .ai-error { color:var(--danger); line-height:1.5; }
 .ai-settings { max-width:560px; }
 .ai-settings fieldset { border:0; padding:0; margin:20px 0; display:flex; flex-direction:column; gap:14px; min-width:0; }
@@ -2732,9 +2737,11 @@ dialog form > label {
 .app-settings .settings-content { min-width:0; min-height:0; height:100%; box-sizing:border-box; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:20px 20px 32px; }
 .model-browser { position:fixed; box-sizing:border-box; left:calc(var(--sidebar-width, 272px) + 688px); top:max(16px, calc((100dvh - 640px) / 2)); width:400px; height:640px; max-height:calc(100dvh - 32px); display:flex; flex-direction:column; z-index:3; overflow:hidden; background:var(--sidebar); color:var(--ink); border:1px solid var(--line); border-radius:9px; box-shadow:0 20px 70px #0004; }
 .model-browser > header { display:flex; align-items:center; justify-content:space-between; min-height:54px; padding:0 16px; border-bottom:1px solid var(--line); }
+.model-browser > footer { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; border-top:1px solid var(--line); background:var(--sidebar); }
+.model-browser > footer small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); }
 .back-button { padding:6px 0; color:var(--ink); font-weight:600; }
 .model-browser-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; padding:10px; }
-.model-browser-list > button { display:flex; width:100%; align-items:flex-start; gap:8px; padding:10px; border-radius:6px; text-align:left; overflow-wrap:anywhere; }
+.model-browser-list > button { display:flex; width:100%; align-items:flex-start; justify-content:flex-start; gap:8px; padding:10px; border-radius:6px; text-align:left; overflow-wrap:anywhere; }
 .model-browser-list > button > span:last-child { display:flex; min-width:0; flex-direction:column; gap:4px; }
 .hf-model-row { display:grid !important; grid-template-columns:20px minmax(0,1fr); column-gap:10px; align-items:start !important; }
 .hf-model-row .model-fit { grid-column:1; grid-row:1 / span 2; margin-top:3px; }
@@ -2749,6 +2756,21 @@ dialog form > label {
 .computer-specs dd { min-width:0; margin:0; overflow-wrap:anywhere; }
 .model-download { display:flex; flex-direction:column; gap:10px; margin:12px 0; padding:12px; border:1px solid var(--line); border-radius:7px; }
 .model-download label { display:flex; flex-direction:column; gap:6px; }
+.hf-download-location { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding:10px 0; border-top:1px solid var(--line); }
+.hf-download-location > div { display:flex; min-width:0; flex-direction:column; gap:3px; }
+.hf-download-location strong,.hf-download-location small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hf-download-location strong { font-size:12px; font-weight:500; }
+.hf-download-location small { color:var(--muted); font-size:11px; }
+.hf-download-location button { flex:0 0 auto; }
+.hf-file-list { padding:8px 10px; }
+.hf-file-row { display:grid !important; grid-template-columns:20px minmax(0,1fr); column-gap:10px; align-items:start !important; min-height:54px; }
+.hf-file-row .model-fit { grid-column:1; margin-top:4px; }
+.hf-file-row > span:last-child { grid-column:2; align-items:flex-start; text-align:left; }
+.hf-file-row strong,.hf-file-row small { width:100%; text-align:left; }
+.about-lotus { max-width:540px; line-height:1.6; }
+.about-lotus h3 { margin-top:0; }
+.about-lotus h4 { margin:22px 0 4px; }
+.about-lotus p { margin:0 0 10px; }
 .library-file { display:flex; flex-direction:column; gap:5px; padding:10px; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
 .library-file > div { display:flex; gap:5px; margin-top:3px; }
 .library-file-title { display:flex !important; align-items:flex-start; gap:8px !important; margin:0 !important; }

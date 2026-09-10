@@ -35,7 +35,7 @@ export function AppSettings({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<
-    "Appearance" | "Workspace" | "Trash" | "Export / Import" | "AI models"
+    "Appearance" | "Workspace" | "Trash" | "Export / Import" | "AI models" | "About"
   >(initialTab ?? "Appearance");
   const [vaults, setVaults] = useState(true);
   const [trash, setTrash] = useState(false);
@@ -109,6 +109,7 @@ export function AppSettings({
               "Appearance",
               "Workspace",
               "AI models",
+              "About",
               "Export / Import",
               "Trash",
             ] as const
@@ -165,6 +166,16 @@ export function AppSettings({
             </>
           ) : tab === "AI models" ? (
             <AISettings />
+          ) : tab === "About" ? (
+            <section className="about-lotus">
+              <h3>About Lotus</h3>
+              <p>Lotus is a local-first workspace for Markdown notes. Your notes remain in the folders you choose on this computer.</p>
+              <h4>Privacy</h4>
+              <p>Lotus does not run its own cloud for your notes or store their contents elsewhere. It reads and writes only the local vault you open.</p>
+              <h4>AI models</h4>
+              <p>You can use a model running locally in Lotus or connect a model provider with your own API key. Lotus sends only the chat and note context you explicitly choose to the selected provider. Local models run on this computer.</p>
+              <p className="muted">Review AI suggestions before applying them to a note.</p>
+            </section>
           ) : tab === "Appearance" ? (
             <>
               <h3>Appearance</h3>
