@@ -226,7 +226,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">(() =>
-    storage.get("notus-theme") === "dark" ? "dark" : "light",
+    storage.get("notus-theme") === "light" ? "light" : "dark",
   );
   const [sidebar, setSidebar] = useState(
     () =>
@@ -374,8 +374,8 @@ export default function App() {
     () => snapshot.entries.filter((e) => !hiddenVaults.includes(e.path)),
     [snapshot.entries, hiddenVaults],
   );
-  const activeVault =
-    visibleEntries.find((e) => e.path === vaultPath) ?? visibleEntries[0];
+  // A vault is deliberately chosen by the user; do not preload the first one.
+  const activeVault = visibleEntries.find((e) => e.path === vaultPath);
   const organizerActive =
     tabs.find((t) => t.id === activeTab)?.organizer === true;
   const files = useMemo(() => flatten(visibleEntries), [visibleEntries]);
@@ -625,7 +625,7 @@ export default function App() {
     navigating.current = true;
     try {
       if (!(await saveAll())) return;
-      await openExtraTab(path);
+      await openCurrentNote(path);
     } finally {
       navigating.current = false;
     }
@@ -872,7 +872,9 @@ export default function App() {
         current.current.root = next.root;
         setSnapshot(next);
         setOrganizer(await api.organizer());
-        setVaultPath(storage.get(`notus-vault:${next.root}`) ?? "");
+        // Launch into a clean workspace. Vaults and the last note are not
+        // restored until the user explicitly chooses a vault or note.
+        setVaultPath("");
         try {
           const saved = JSON.parse(
             storage.get(`notus-collapsed:${next.root}`) ?? "[]",
@@ -897,26 +899,18 @@ export default function App() {
           /* Ignore malformed UI preferences. */
         }
         setHiddenVaults(hidden);
-        const last =
-          new URLSearchParams(window.location.search).get("note") ??
-          (getCurrentWindow().label !== "main"
-            ? null
-            : storage.get(`notus-last:${next.root}`));
+        const last = new URLSearchParams(window.location.search).get("note");
         const found = flatten(
           next.entries.filter((e) => !hidden.includes(e.path)),
         ).find((e) => e.path === last && e.kind === "note");
         if (found) {
-          if (!storage.get(`notus-vault:${next.root}`))
-            setVaultPath(found.path.split("/")[0]);
+          setVaultPath(found.path.split("/")[0]);
           const note = await api.read(found.path);
           if (!cancelled) {
             live.current.loadDocument(note);
             setSelected(note.path);
           }
-        } else
-          setSelected(
-            next.entries.find((e) => !hidden.includes(e.path))?.path ?? "",
-          );
+        } else setSelected("");
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
@@ -1287,6 +1281,21 @@ export default function App() {
     if (!existing) setTabs((previous) => [...previous, { id, path }]);
     activeTabRef.current = id;
     setActiveTab(id);
+    setTableActions(null);
+    setTableMenu(null);
+    loadDocument(next);
+    setSelected(path);
+    setError("");
+  };
+  const openCurrentNote = async (path: string, preserveVault = false) => {
+    if (!preserveVault) setVaultPath(path.split("/")[0]);
+    if (!(await saveAll()))
+      throw new Error("Save or recover the current draft first.");
+    const next = await api.read(path);
+    // Sidebar navigation replaces this temporary view. The tab strip is only
+    // for notes deliberately dropped there by the user.
+    activeTabRef.current = 0;
+    setActiveTab(0);
     setTableActions(null);
     setTableMenu(null);
     loadDocument(next);

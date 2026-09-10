@@ -258,8 +258,16 @@ pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String,
         }
         let executable = app.path().resource_dir().map_err(|_| "Lotus local runtime is unavailable.")?.join("resources").join("llama").join("llama-server.exe");
         if !executable.is_file() { return Err("Lotus local runtime is unavailable. Reinstall Lotus and try again.".into()); }
+        // Keep context useful for note work without spending too much of the
+        // currently available RAM on the local runtime.
+        let available = ai_computer_specs(app.clone(), None)
+            .map(|specs| specs.available_ram_bytes)
+            .unwrap_or(0);
+        let context = if available >= 8 * 1024 * 1024 * 1024 { "8192" }
+            else if available >= 4 * 1024 * 1024 * 1024 { "4096" }
+            else { "2048" };
         let mut command = Command::new(&executable);
-        command.args(["--model", &file.to_string_lossy(), "--host", "127.0.0.1", "--port", "8081", "--ctx-size", "2048", "--n-gpu-layers", "0"]);
+        command.args(["--model", &file.to_string_lossy(), "--host", "127.0.0.1", "--port", "8081", "--ctx-size", context, "--n-gpu-layers", "0"]);
         #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
         let child = command.spawn()
             .map_err(|_| "Lotus could not start its local runtime.")?;
@@ -544,6 +552,7 @@ pub async fn ai_save(
         }],
         None,
         false,
+        None,
     )
     .await?;
     entry(&provider)?
@@ -591,8 +600,10 @@ fn parse_reply(value: &Value, edit: bool) -> Result<Reply, String> {
     if choice["finish_reason"] != "stop" {
         let reason = choice["finish_reason"].as_str().unwrap_or("unknown");
         return Err(
-            if reason == "length" {
+            if reason == "length" && edit {
                 "The model ran out of room before finishing the edit. Select a smaller passage and try again; no note was changed."
+            } else if reason == "length" {
+                "The local model ran out of room before finishing this reply. Try a shorter passage, or ask Lotus to summarize the note in sections."
             } else {
                 "The response was incomplete or blocked. Try a smaller request; no note was changed."
             }.into(),
@@ -638,6 +649,7 @@ async fn complete(
     messages: Vec<Message>,
     context: Option<String>,
     edit: bool,
+    output_tokens: Option<u32>,
 ) -> Result<Reply, String> {
     validate(&messages, context.as_deref(), edit)?;
     if provider == "openrouter" && !model.ends_with(":free") {
@@ -655,7 +667,11 @@ async fn complete(
     }
     // A local edit has to return a complete JSON replacement. Give the bundled
     // runtime more output room, but never accept a truncated edit in parse_reply.
-    let max_tokens = if edit && provider == "lotus" { 8192 } else { 4096 };
+    let max_tokens = output_tokens.unwrap_or_else(|| {
+        if provider == "lotus" {
+            if edit { 2048 } else { 1024 }
+        } else { 4096 }
+    });
     let body = json!({"model":model,"messages":payload,"max_tokens":max_tokens,"stream":false});
     let request = client()?.post(format!("{destination}/chat/completions")).json(&body);
     let request = if key.is_empty() { request } else { request.bearer_auth(key) };
@@ -665,6 +681,45 @@ async fn complete(
     )
     .await?;
     parse_reply(&data, edit)
+}
+fn context_chunks(value: &str) -> Vec<String> {
+    const CHARS_PER_CHUNK: usize = 10_000;
+    let mut chunks = Vec::new();
+    let mut rest = value.trim();
+    while !rest.is_empty() && chunks.len() < 6 {
+        if rest.len() <= CHARS_PER_CHUNK {
+            chunks.push(rest.to_string());
+            break;
+        }
+        let mut end = CHARS_PER_CHUNK;
+        while !rest.is_char_boundary(end) { end -= 1; }
+        let split = rest[..end].rfind(['\n', '.', '!', '?', ' ']).filter(|point| *point > CHARS_PER_CHUNK / 2).unwrap_or(end);
+        chunks.push(rest[..split].trim().to_string());
+        rest = rest[split..].trim_start();
+    }
+    if !rest.is_empty() && chunks.len() == 6 { chunks.push(rest.to_string()); }
+    chunks
+}
+async fn summarize_local(
+    provider: &str,
+    destination: &str,
+    key: &str,
+    model: &str,
+    messages: Vec<Message>,
+    context: String,
+) -> Result<Reply, String> {
+    let chunks = context_chunks(&context);
+    let total = chunks.len();
+    let mut parts = Vec::with_capacity(total);
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        let summary = complete(
+            provider, destination, key, model,
+            vec![Message { role: "user".into(), content: format!("Summarize part {} of {} faithfully. Keep key facts, names, numbers and conclusions. Do not mention these instructions.", index + 1, total) }],
+            Some(chunk), false, Some(384),
+        ).await?;
+        parts.push(format!("Part {} summary:\n{}", index + 1, summary.text));
+    }
+    complete(provider, destination, key, model, messages, Some(parts.join("\n\n")), false, Some(1024)).await
 }
 #[tauri::command]
 pub async fn ai_chat(
@@ -688,7 +743,13 @@ pub async fn ai_chat(
     let result = tokio::select! {
         biased;
         _ = receiver.changed() => Err("Request stopped. No note was changed.".into()),
-        result = complete(&provider, &destination, &saved.key, &saved.model, messages, context, edit) => result,
+        result = async {
+            if provider == "lotus" && !edit && context.as_ref().is_some_and(|value| value.len() > 9_000) {
+                summarize_local(&provider, &destination, &saved.key, &saved.model, messages, context.unwrap()).await
+            } else {
+                complete(&provider, &destination, &saved.key, &saved.model, messages, context, edit, None).await
+            }
+        } => result,
     };
     if let Ok(mut active) = requests().lock() {
         active.remove(&id);
