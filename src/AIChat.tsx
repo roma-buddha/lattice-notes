@@ -28,7 +28,7 @@ export function AIChat({
   apply: (note: NoteContext, replacement: string) => Promise<void>;
 }) {
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [provider, setProvider] = useState<Provider>("groq");
+  const [provider, setProvider] = useState<Provider>("openrouter");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [context, setContext] = useState<"none" | "note" | "selection">("none");
@@ -53,7 +53,7 @@ export function AIChat({
           setProvider((p) =>
             list.some((c) => c.provider === p)
               ? p
-              : (list[0]?.provider ?? "groq"),
+              : (list[0]?.provider ?? "openrouter"),
           );
         })
         .catch((e) => setError(String(e)));
@@ -110,13 +110,18 @@ export function AIChat({
       setError("Choose an unlocked note or selection to edit.");
       return;
     }
+    const message = input.trim();
     const next: Message[] = [
       ...messages,
-      { role: "user", content: input.trim() },
+      { role: "user", content: message },
     ];
     const id = ++generation.current;
     setBusy(true);
     setProposal(null);
+    // Make sending feel like a conversation: the message leaves the composer
+    // before the provider starts working, and is retained if the request fails.
+    setMessages(next);
+    setInput("");
     try {
       const reply = await ai.chat(
         provider,
@@ -126,7 +131,6 @@ export function AIChat({
       );
       if (id !== generation.current) return;
       setMessages([...next, { role: "assistant", content: reply.text }]);
-      setInput("");
       if (reply.replacement !== null && attached)
         setProposal({ note: attached, replacement: reply.replacement });
     } catch (e) {
@@ -353,7 +357,17 @@ export function AIChat({
           }}
         />
         <div className="ai-send">
-          <small>AI can make mistakes. Review edits.</small>
+          <div className="ai-quick-controls" aria-label="Message options">
+            <select aria-label="Message context" value={context} disabled={busy} onChange={(e) => setContext(e.target.value as typeof context)}>
+              <option value="none">No note</option>
+              <option value="note">Note</option>
+              <option value="selection" disabled={!capture()}>Selected text</option>
+            </select>
+            <select aria-label="Message mode" value={mode} disabled={busy || context === "none"} onChange={(e) => setMode(e.target.value as typeof mode)}>
+              <option value="chat">Chat</option>
+              <option value="edit">Edit</option>
+            </select>
+          </div>
           {busy ? (
             <button onClick={stop}>
               <Square size={14} />

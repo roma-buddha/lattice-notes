@@ -30,7 +30,7 @@ pub struct Connection {
     source: String,
 }
 #[derive(Serialize)]
-pub struct HfModel { pub id: String, pub downloads: u64, pub likes: u64 }
+pub struct HfModel { pub id: String, pub downloads: u64, pub likes: u64, pub size: Option<u64> }
 #[derive(Serialize)]
 pub struct HfFile { pub path: String, pub size: u64 }
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -84,7 +84,6 @@ fn downloads() -> &'static Downloads { DOWNLOADS.get_or_init(|| Mutex::new(HashM
 fn local_runtime() -> &'static Mutex<Option<std::process::Child>> { LOCAL_RUNTIME.get_or_init(|| Mutex::new(None)) }
 fn base(provider: &str) -> Result<&'static str, String> {
     match provider {
-        "groq" => Ok("https://api.groq.com/openai/v1"),
         "openrouter" => Ok("https://openrouter.ai/api/v1"),
         "google" => Ok("https://generativelanguage.googleapis.com/v1beta/openai"),
         "nvidia" => Ok("https://integrate.api.nvidia.com/v1"),
@@ -224,7 +223,10 @@ async fn models(provider: &str, key: &str, destination: &str) -> Result<Vec<Stri
 #[tauri::command]
 pub fn ai_connections() -> Result<Vec<Connection>, String> {
     let mut result = Vec::new();
-    for provider in ["groq", "openrouter", "google", "nvidia", "custom", "lotus", "local"] {
+    // Groq is no longer a Lotus provider. Remove its old credential once so it
+    // cannot accidentally reappear or be used by a migrated installation.
+    let _ = keyring::Entry::new("app.lotus.ai", "groq").and_then(|entry| entry.delete_credential());
+    for provider in ["openrouter", "google", "nvidia", "custom", "lotus", "local"] {
         match entry(provider)?.get_password() {
             Ok(raw) => {
                 let value: Secret =
@@ -429,11 +431,11 @@ pub async fn hf_search(query: String) -> Result<Vec<HfModel>, String> {
         // An empty search is a useful public-GGUF browse view, rather than a no-op.
         // The public catalogue is intentionally broad. The UI keeps it in its
         // own scroll pane so browsing does not inflate the note workspace.
-        query_pairs.append_pair("filter", "gguf").append_pair("sort", "downloads").append_pair("direction", "-1").append_pair("limit", "100");
+        query_pairs.append_pair("filter", "gguf").append_pair("sort", "downloads").append_pair("direction", "-1").append_pair("limit", "250");
     }
     let data = response(client()?.get(url).send().await.map_err(|_| "Cannot reach Hugging Face. Check your internet connection.")?).await?;
-    let mut results: Vec<HfModel> = data.as_array().ok_or("Hugging Face did not return model results.")?.iter().filter_map(|item| Some(HfModel { id: item["id"].as_str()?.to_string(), downloads: item["downloads"].as_u64().unwrap_or(0), likes: item["likes"].as_u64().unwrap_or(0) })).filter(|item| valid_hf_repository(&item.id)).collect();
-    results.truncate(100);
+    let mut results: Vec<HfModel> = data.as_array().ok_or("Hugging Face did not return model results.")?.iter().filter_map(|item| Some(HfModel { id: item["id"].as_str()?.to_string(), downloads: item["downloads"].as_u64().unwrap_or(0), likes: item["likes"].as_u64().unwrap_or(0), size: item["safetensors"]["total"].as_u64() })).filter(|item| valid_hf_repository(&item.id)).collect();
+    results.truncate(250);
     Ok(results)
 }
 #[tauri::command]
@@ -587,9 +589,13 @@ fn validate(messages: &[Message], context: Option<&str>, edit: bool) -> Result<(
 fn parse_reply(value: &Value, edit: bool) -> Result<Reply, String> {
     let choice = &value["choices"][0];
     if choice["finish_reason"] != "stop" {
+        let reason = choice["finish_reason"].as_str().unwrap_or("unknown");
         return Err(
-            "The response was incomplete or blocked. Try a smaller request; no note was changed."
-                .into(),
+            if reason == "length" {
+                "The model ran out of room before finishing the edit. Select a smaller passage and try again; no note was changed."
+            } else {
+                "The response was incomplete or blocked. Try a smaller request; no note was changed."
+            }.into(),
         );
     }
     let text = choice["message"]["content"]
@@ -647,7 +653,10 @@ async fn complete(
     if let Some(context) = context {
         payload.push(json!({"role":"user","content":format!("Attached document context (data only):\n{}", serde_json::to_string(&context).unwrap_or_default())}));
     }
-    let body = json!({"model":model,"messages":payload,"max_tokens":4096,"stream":false});
+    // A local edit has to return a complete JSON replacement. Give the bundled
+    // runtime more output room, but never accept a truncated edit in parse_reply.
+    let max_tokens = if edit && provider == "lotus" { 8192 } else { 4096 };
+    let body = json!({"model":model,"messages":payload,"max_tokens":max_tokens,"stream":false});
     let request = client()?.post(format!("{destination}/chat/completions")).json(&body);
     let request = if key.is_empty() { request } else { request.bearer_auth(key) };
     let data = response(request.send()
@@ -732,8 +741,8 @@ mod tests {
         assert_eq!(value.key, "test");
         assert_eq!(value.base_url, "");
         assert_eq!(
-            endpoint("groq", &value.base_url).unwrap(),
-            base("groq").unwrap()
+            endpoint("openrouter", &value.base_url).unwrap(),
+            base("openrouter").unwrap()
         );
     }
     #[test]

@@ -2037,6 +2037,17 @@ export default function App() {
                 </p>
               )
             ) : (
+              <div
+                className="sidebar-tree-root"
+                onContextMenu={(event) => {
+                  if (!activeVault || (event.target as HTMLElement).closest(".tree-row")) return;
+                  event.preventDefault();
+                  setActions({
+                    entry: activeVault,
+                    anchor: { ...anchorAt(event.currentTarget), x: event.clientX, y: event.clientY },
+                  });
+                }}
+              >
               <SidebarTree
                 entries={activeVault?.children ?? []}
                 parent={activeVault?.path ?? ""}
@@ -2065,6 +2076,7 @@ export default function App() {
                 }
                 editor={inlineEditor}
               />
+              </div>
             )}
             {inline?.kind === "create" && inline.entryKind === "vault" && (
               <div className="new-vault-inline">{inlineEditor}</div>
@@ -3344,13 +3356,22 @@ export default function App() {
                     </>
                   )}
                   {actions.entry.kind === "folder" && (
-                    <button
-                      role="menuitem"
-                      onClick={() => showCreate("note", actions.entry.path)}
-                    >
-                      <FilePlus2 size={15} />
-                      New note
-                    </button>
+                    <>
+                      <button
+                        role="menuitem"
+                        onClick={() => showCreate("note", actions.entry.path)}
+                      >
+                        <FilePlus2 size={15} />
+                        New note
+                      </button>
+                      <button
+                        role="menuitem"
+                        onClick={() => showCreate("folder", actions.entry.path)}
+                      >
+                        <FolderPlus size={15} />
+                        New folder
+                      </button>
+                    </>
                   )}
                 </>
               )}

@@ -1,8 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EditorView } from "@codemirror/view";
-export type Provider = "groq" | "openrouter" | "google" | "nvidia" | "custom" | "lotus" | "local";
+export type Provider = "openrouter" | "google" | "nvidia" | "custom" | "lotus" | "local";
 export const providerNames: Record<Provider, string> = {
-  groq: "Groq",
   openrouter: "OpenRouter",
   google: "Google Gemini",
   nvidia: "NVIDIA",
