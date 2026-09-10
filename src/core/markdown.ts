@@ -1,6 +1,12 @@
 import yaml from "js-yaml";
 import type { IndexedNote, LinkRef, VaultIndex } from "../types";
 
+export function relativeNoteLink(source: string, destination: string): string {
+  const from = source.split("/").slice(0, -1), to = destination.split("/");
+  while (from.length && to.length && from[0] === to[0]) { from.shift(); to.shift(); }
+  return [...from.map(() => ".."), ...to.map(part => encodeURIComponent(part).replaceAll("(", "%28").replaceAll(")", "%29"))].join("/");
+}
+
 export function parseLinks(content: string): LinkRef[] {
   const links: LinkRef[] = [];
   const wiki = /\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]/g;
@@ -37,7 +43,11 @@ export function splitFrontmatter(content: string): {
   if (!match) return { properties: {}, body: content, valid: true, raw: "" };
   try {
     return {
-      properties: (yaml.load(match[1]) as Record<string, unknown>) || {},
+      properties: (() => {
+        const value = yaml.load(match[1], { schema: yaml.JSON_SCHEMA });
+        if (value != null && (typeof value !== "object" || Array.isArray(value))) throw new Error("Properties must be a mapping");
+        return (value as Record<string, unknown>) || {};
+      })(),
       body: content.slice(match[0].length),
       valid: true,
       raw: match[1],
@@ -57,9 +67,7 @@ export function updateFrontmatter(
   properties: Record<string, unknown>,
 ): string {
   const parsed = splitFrontmatter(content);
-  const body = parsed.raw
-    ? content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
-    : content;
+  const body = parsed.body;
   return `---\n${yaml.dump(properties, { lineWidth: -1, noRefs: true }).trim()}\n---\n${body}`;
 }
 

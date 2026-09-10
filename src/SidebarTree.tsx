@@ -1,16 +1,11 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import {
-  BookOpen,
-  ChevronDown,
-  ChevronRight,
-  Ellipsis,
-  FileText,
-  Folder,
-  FolderOpen,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import { stem, type Entry } from "./notus";
 
 import { anchorAt, type Anchor, type InlineEdit } from "./sidebarTypes";
+
+const INITIAL_NOTE_ROWS = 250;
+const NOTE_ROW_STEP = 250;
 export function InlineName({
   value,
   error,
@@ -64,9 +59,6 @@ export function InlineName({
           {error}
         </span>
       )}
-      <span className="inline-hint">
-        {working ? "Saving…" : "Enter to save · Esc to cancel"}
-      </span>
     </form>
   );
 }
@@ -83,6 +75,7 @@ type Props = {
   onActions: (entry: Entry, anchor: Anchor) => void;
   inline: InlineEdit | null;
   editor: React.ReactNode;
+  externalDropTarget?: string;
 };
 export function SidebarTree(props: Props) {
   const {
@@ -96,25 +89,37 @@ export function SidebarTree(props: Props) {
     onActions,
     inline,
     editor,
+    externalDropTarget,
     depth = 0,
     parent = "",
   } = props;
   const [over, setOver] = useState("");
+  const [noteRows, setNoteRows] = useState(INITIAL_NOTE_ROWS);
   const matches = (entry: Entry): boolean =>
     entry.name.toLowerCase().includes(query.toLowerCase()) ||
     entry.children.some(matches);
   return (
     <>
-      {entries.filter(matches).map((entry) => {
+      {(() => {
+        const matching = entries.filter(matches);
+        // Folders stay visible, while a very large note folder is progressively
+        // rendered. This bounds DOM work even for vaults with thousands of files.
+        const folders = matching.filter((entry) => entry.kind !== "note");
+        const notes = matching.filter((entry) => entry.kind === "note");
+        const shown = query ? matching : [...folders, ...notes.slice(0, noteRows)];
+        return shown.map((entry) => {
         const folder = entry.kind !== "note";
         const open = !collapsed.has(entry.path) || !!query;
         const renaming =
           inline?.kind === "rename" && inline.entry.path === entry.path;
         return (
-          <div key={entry.path} className={depth === 0 ? "vault-group" : ""}>
+          <div
+            key={entry.path}
+            className={entry.kind === "vault" ? "vault-group" : "folder-group"}
+          >
             <div
               data-path={entry.path}
-              className={`tree-row ${selected === entry.path ? "selected" : ""} ${over === entry.path ? "drop-target" : ""}`}
+              className={`tree-row kind-${entry.kind} ${selected === entry.path ? "selected" : ""} ${over === entry.path || externalDropTarget === entry.path ? "drop-target" : ""}`}
               style={{ paddingLeft: 6 + depth * 16 }}
               draggable={entry.kind !== "vault" && !inline}
               onContextMenu={(event) => {
@@ -144,11 +149,16 @@ export function SidebarTree(props: Props) {
               }}
               onDragStart={(event) => {
                 event.dataTransfer.setData("text/notus-path", entry.path);
-                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/notus-kind", entry.kind);
+                event.dataTransfer.setData(`notus-${entry.kind}`, "1");
+                event.dataTransfer.effectAllowed = "copyMove";
               }}
               onDragOver={(event) => {
                 if (
-                  folder &&
+                  ((entry.kind === "folder" &&
+                    event.dataTransfer.types.includes("notus-note")) ||
+                    (entry.kind === "vault" &&
+                      event.dataTransfer.types.includes("notus-folder"))) &&
                   event.dataTransfer.types.includes("text/notus-path")
                 ) {
                   event.preventDefault();
@@ -162,7 +172,13 @@ export function SidebarTree(props: Props) {
                 event.stopPropagation();
                 setOver("");
                 const path = event.dataTransfer.getData("text/notus-path");
-                if (folder && path) onMove(path, entry.path);
+                const kind = event.dataTransfer.getData("text/notus-kind");
+                if (
+                  path &&
+                  ((entry.kind === "folder" && kind === "note") ||
+                    (entry.kind === "vault" && kind === "folder"))
+                )
+                  onMove(path, entry.path);
               }}
             >
               {folder ? (
@@ -191,17 +207,6 @@ export function SidebarTree(props: Props) {
                     aria-current={selected === entry.path ? "page" : undefined}
                     onClick={() => onSelect(entry)}
                   >
-                    {entry.kind === "vault" ? (
-                      <BookOpen size={16} />
-                    ) : folder ? (
-                      open ? (
-                        <FolderOpen size={15} />
-                      ) : (
-                        <Folder size={15} />
-                      )
-                    ) : (
-                      <FileText size={15} />
-                    )}
                     <span>
                       {entry.kind === "note" ? stem(entry.name) : entry.name}
                     </span>
@@ -229,17 +234,25 @@ export function SidebarTree(props: Props) {
             )}
           </div>
         );
-      })}
+        });
+      })()}
+      {!query && entries.filter(matches).filter((entry) => entry.kind === "note").length > noteRows && (
+        <button
+          className="tree-show-more"
+          type="button"
+          onClick={() => setNoteRows((count) => count + NOTE_ROW_STEP)}
+        >
+          Show {Math.min(NOTE_ROW_STEP, entries.filter(matches).filter((entry) => entry.kind === "note").length - noteRows)} more notes
+        </button>
+      )}
       {inline?.kind === "create" && inline.parent === parent && (
         <div
-          className="tree-row temporary-row"
-          style={{ paddingLeft: 25 + depth * 16 }}
+          className={`tree-row temporary-row kind-${inline.entryKind}`}
+          style={{ paddingLeft: 6 + depth * 16 }}
         >
-          {inline.entryKind === "note" ? (
-            <FileText size={15} />
-          ) : (
-            <Folder size={15} />
-          )}
+          <span className="creation-twisty">
+            {inline.entryKind === "folder" ? <ChevronRight size={14} /> : null}
+          </span>
           {editor}
         </div>
       )}

@@ -1,7 +1,7 @@
 {
   "identifier": "default",
-  "description": "Notus desktop window controls; filesystem access is restricted to validated Rust commands.",
-  "windows": ["main"],
+  "description": "Lotus desktop window controls; filesystem access is restricted to validated Rust commands.",
+  "windows": ["main", "note-*"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

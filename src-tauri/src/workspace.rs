@@ -17,21 +17,33 @@ pub struct Entry {
     pub path: String,
     pub kind: String,
     pub children: Vec<Entry>,
+    pub identity: Option<String>,
 }
 #[derive(Serialize)]
 pub struct Snapshot {
     pub root: String,
     pub entries: Vec<Entry>,
+    pub legacy_root: Option<String>,
 }
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct Document {
     pub path: String,
     pub content: String,
     pub revision: String,
+    pub locked: bool,
+}
+
+/// A deliberately small search result. Sending note contents to the webview for
+/// every result would make large workspaces slow and needlessly duplicate data.
+#[derive(Serialize, Debug, Clone)]
+pub struct SearchResult {
+    pub path: String,
+    pub snippet: String,
 }
 
 pub struct Workspace {
     pub root: PathBuf,
+    pub home: Option<PathBuf>,
 }
 pub fn valid_name(name: &str) -> Result<()> {
     let stem = name.split('.').next().unwrap_or("").to_uppercase();
@@ -65,14 +77,50 @@ fn revision(content: &str) -> String {
     format!("{:x}", Sha256::digest(content.as_bytes()))
 }
 
+#[cfg(windows)]
+fn file_identity(path: &Path) -> Option<String> {
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS,
+    };
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return None;
+    }
+    Some(format!(
+        "{}:{}:{}",
+        info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow
+    ))
+}
+#[cfg(not(windows))]
+fn file_identity(_path: &Path) -> Option<String> {
+    None
+}
+
 impl Workspace {
     pub fn new(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(&root).map_err(err)?;
-        Ok(Self {
+        let workspace = Self {
             root: root.canonicalize().map_err(err)?,
-        })
+            home: None,
+        };
+        workspace.internal_dir(".notus-trash")?;
+        workspace.migrate()?;
+        Ok(workspace)
     }
     pub fn resolve(&self, relative: &str) -> Result<PathBuf> {
+        if !relative.is_empty()
+            && relative
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            return Err("Invalid workspace path.".into());
+        }
         if relative.contains('\\') || relative.contains(':') || relative.starts_with('/') {
             return Err("Invalid workspace path.".into());
         }
@@ -81,6 +129,9 @@ impl Workspace {
             let Component::Normal(part) = component else {
                 return Err("Path leaves the workspace.".into());
             };
+            if part.to_string_lossy().starts_with('.') {
+                return Err("Internal workspace paths are protected.".into());
+            }
             path.push(part);
             if path.exists() {
                 let canonical = path.canonicalize().map_err(err)?;
@@ -118,6 +169,7 @@ impl Workspace {
             }
             if kind.is_dir() {
                 entries.push(Entry {
+                    identity: file_identity(&child.path()),
                     name,
                     path: path.clone(),
                     kind: if relative.is_empty() {
@@ -130,6 +182,7 @@ impl Workspace {
                 });
             } else if !relative.is_empty() && is_note(&child.path()) {
                 entries.push(Entry {
+                    identity: file_identity(&child.path()),
                     name,
                     path,
                     kind: "note".into(),
@@ -152,25 +205,98 @@ impl Workspace {
                 .trim_start_matches("\\\\?\\")
                 .into(),
             entries: self.walk("")?,
+            legacy_root: self.home.as_ref().map(|p| {
+                p.to_string_lossy()
+                    .trim_start_matches("\\\\?\\")
+                    .to_string()
+            }),
         })
+    }
+    fn search_walk(
+        &self,
+        relative: &str,
+        query: &str,
+        names: &mut Vec<SearchResult>,
+        contents: &mut Vec<SearchResult>,
+        limit: usize,
+    ) -> Result<()> {
+        for child in fs::read_dir(self.resolve(relative)?).map_err(err)? {
+            let child = child.map_err(err)?;
+            let name = child.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name.ends_with(".lattice-tmp") {
+                continue;
+            }
+            let kind = child.file_type().map_err(err)?;
+            if kind.is_symlink() {
+                continue;
+            }
+            let path = if relative.is_empty() { name.clone() } else { format!("{relative}/{name}") };
+            if self.resolve(&path).is_err() {
+                continue;
+            }
+            if kind.is_dir() {
+                self.search_walk(&path, query, names, contents, limit)?;
+                continue;
+            }
+            if relative.is_empty() || !is_note(&child.path()) || names.len() + contents.len() >= limit {
+                continue;
+            }
+            if name.to_lowercase().contains(query) {
+                names.push(SearchResult { path, snippet: relative.into() });
+                continue;
+            }
+            let content = match fs::read_to_string(child.path()) {
+                Ok(content) => content,
+                Err(_) => continue, // Files can disappear while an external app is moving them.
+            };
+            let haystack = content.to_lowercase();
+            if let Some(index) = haystack.find(query) {
+                let start = content[..index].char_indices().rev().nth(24).map(|(i, _)| i).unwrap_or(0);
+                let end = content[index..].char_indices().nth(100).map(|(i, _)| index + i).unwrap_or(content.len());
+                contents.push(SearchResult {
+                    path,
+                    snippet: content[start..end].split_whitespace().collect::<Vec<_>>().join(" "),
+                });
+            }
+        }
+        Ok(())
+    }
+    /// Search is intentionally native and batched: the old webview loop made a
+    /// separate IPC read for every note on every keystroke.
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut names = Vec::new();
+        let mut contents = Vec::new();
+        self.search_walk("", &query, &mut names, &mut contents, limit.min(100).max(1))?;
+        names.extend(contents);
+        Ok(names)
     }
     pub fn read(&self, relative: &str) -> Result<Document> {
         let path = self.resolve(relative)?;
-        if !is_note(&path) {
-            return Err("Only Markdown notes can be opened.".into());
+        if !is_note(&path) || depth(relative) != 3 {
+            return Err("Open a Markdown note inside a folder in a vault.".into());
         }
         let content = fs::read_to_string(path).map_err(err)?;
         Ok(Document {
             path: relative.into(),
             revision: revision(&content),
             content,
+            locked: self.locks()?.contains(relative),
         })
     }
     pub fn write(&self, relative: &str, content: &str, expected: &str) -> Result<Document> {
         let current = self.read(relative)?;
+        if current.locked {
+            return Err(
+                "This note is locked. Unlock it before editing; your draft is kept.".into(),
+            );
+        }
         if current.revision != expected {
             return Err(
-                "CONFLICT: This note changed outside Notus. Your draft has been kept.".into(),
+                "CONFLICT: This note changed outside Lotus. Your draft has been kept.".into(),
             );
         }
         let path = self.resolve(relative)?;
@@ -189,8 +315,8 @@ impl Workspace {
         }
         match kind {
             "vault" if parent.is_empty() => {}
-            "folder" if depth(parent) >= 1 => {}
-            "note" if depth(parent) >= 1 => {}
+            "folder" if depth(parent) == 1 => {}
+            "note" if depth(parent) == 2 => {}
             _ => return Err("Select a vault or a folder inside a vault first.".into()),
         }
         let name = if kind == "note" && !is_note(Path::new(name)) {
@@ -226,6 +352,52 @@ impl Workspace {
         }
         Ok(relative)
     }
+    /// Copy external Markdown files into an existing vault folder. Originals are
+    /// never moved or modified, and source links are rejected before copying.
+    pub fn import_markdown(&self, parent: &str, sources: &[String]) -> Result<Vec<String>> {
+        if depth(parent) != 2 || sources.is_empty() {
+            return Err("Drop Markdown files onto a folder inside a vault.".into());
+        }
+        if sources.len() > 100 {
+            return Err("Drop up to 100 Markdown files at a time.".into());
+        }
+        let destination = self.resolve(parent)?;
+        if !destination.is_dir() {
+            return Err("Choose an existing folder.".into());
+        }
+        let mut imported = Vec::new();
+        for source in sources {
+            let source = PathBuf::from(source);
+            let metadata = fs::symlink_metadata(&source).map_err(err)?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err("Only ordinary Markdown files can be imported.".into());
+            }
+            if !is_note(&source) {
+                return Err("Only .md or .markdown files can be imported.".into());
+            }
+            if metadata.len() > 20 * 1024 * 1024 {
+                return Err("Each imported Markdown file must be 20 MB or smaller.".into());
+            }
+            let source = source.canonicalize().map_err(err)?;
+            if source.starts_with(&self.root) {
+                return Err("This note is already inside the Lotus workspace.".into());
+            }
+            let original = source.file_name().ok_or("Invalid Markdown filename.")?
+                .to_string_lossy().to_string();
+            valid_name(&original)?;
+            let stem = source.file_stem().ok_or("Invalid Markdown filename.")?.to_string_lossy();
+            let extension = source.extension().ok_or("Invalid Markdown filename.")?.to_string_lossy();
+            let mut number = 2usize;
+            let mut name = original.clone();
+            while destination.join(&name).exists() {
+                name = format!("{stem} ({number}).{extension}");
+                number += 1;
+            }
+            fs::copy(&source, destination.join(&name)).map_err(err)?;
+            imported.push(format!("{parent}/{name}"));
+        }
+        Ok(imported)
+    }
     pub fn relocate(&self, relative: &str, parent: &str, name: &str) -> Result<String> {
         valid_name(name)?;
         if relative.is_empty() {
@@ -237,12 +409,12 @@ impl Workspace {
             return Err("Select an existing destination folder.".into());
         }
         let file = source.is_file();
-        if file && (!is_note(&source) || depth(parent) < 1) {
-            return Err("Notes must be moved into a vault or one of its folders.".into());
+        if file && (!is_note(&source) || depth(parent) != 2) {
+            return Err("Notes must be inside a folder in a vault.".into());
         }
         if !file
             && ((depth(relative) == 1 && !parent.is_empty())
-                || (depth(relative) > 1 && parent.is_empty()))
+                || (depth(relative) > 1 && depth(parent) != 1))
         {
             return Err("Keep vaults at the workspace root and subfolders inside vaults.".into());
         }
@@ -267,13 +439,14 @@ impl Workspace {
             return Err("A folder cannot be moved inside itself.".into());
         }
         fs::rename(source, destination).map_err(err)?;
+        self.move_locks(relative, &next)?;
         Ok(next)
     }
     pub fn remove(&self, relative: &str) -> Result<()> {
         if relative.is_empty() {
             return Err("The workspace root cannot be deleted.".into());
         }
-        trash::delete(self.resolve(relative)?).map_err(err)
+        self.trash(relative)
     }
     pub fn import(&self, source: &Path) -> Result<String> {
         let source = source.canonicalize().map_err(err)?;
@@ -295,6 +468,7 @@ impl Workspace {
         let staging = tempfile::tempdir_in(&self.root).map_err(err)?;
         copy_folder(&source, staging.path(), true)?;
         fs::rename(staging.path(), self.root.join(&name)).map_err(err)?;
+        self.migrate()?;
         Ok(name)
     }
 }
@@ -338,13 +512,9 @@ mod tests {
         w.create("", "vault", "Work").unwrap();
         w.create("", "vault", "Personal").unwrap();
         assert!(w.create("", "note", "Rogue").is_err());
-        let root_note = w.create("Work", "note", "Overview").unwrap();
-        assert_eq!(root_note, "Work/Overview.md");
-        assert_eq!(
-            w.relocate(&root_note, "Personal", "Overview").unwrap(),
-            "Personal/Overview.md"
-        );
+        assert!(w.create("Work", "note", "Overview").is_err());
         w.create("Work", "folder", "Ideas").unwrap();
+        assert!(w.create("Work/Ideas", "folder", "Nested").is_err());
         w.create("Personal", "folder", "Journal").unwrap();
         let note = w.create("Work/Ideas", "note", "First").unwrap();
         let original = w.read(&note).unwrap();
@@ -396,5 +566,67 @@ mod tests {
             fs::read_to_string(source.join("Existing.md")).unwrap(),
             "my writing"
         );
+    }
+    #[test]
+    fn large_workspace_snapshot_and_search_are_bounded() {
+        let temp = tempfile::tempdir().unwrap();
+        let w = Workspace::new(temp.path().into()).unwrap();
+        w.create("", "vault", "Research").unwrap();
+        w.create("Research", "folder", "Notes").unwrap();
+        let folder = w.resolve("Research/Notes").unwrap();
+        for number in 0..2_000 {
+            fs::write(
+                folder.join(format!("Note {number}.md")),
+                format!("# Note {number}\\nA searchable research record."),
+            )
+            .unwrap();
+        }
+        let snapshot = w.snapshot().unwrap();
+        assert_eq!(snapshot.entries[0].children[0].children.len(), 2_000);
+        let results = w.search("searchable", 80).unwrap();
+        assert_eq!(results.len(), 80);
+        assert!(results.iter().all(|result| result.path.ends_with(".md")));
+    }
+    #[test]
+    fn importing_markdown_copies_external_files_and_renames_collisions() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let source = outside.path().join("Outline.md");
+        fs::write(&source, "# Original").unwrap();
+        let w = Workspace::new(temp.path().into()).unwrap();
+        w.create("", "vault", "Research").unwrap();
+        w.create("Research", "folder", "Notes").unwrap();
+        let first = w
+            .import_markdown("Research/Notes", &[source.to_string_lossy().into()])
+            .unwrap();
+        let second = w
+            .import_markdown("Research/Notes", &[source.to_string_lossy().into()])
+            .unwrap();
+        assert_eq!(first, ["Research/Notes/Outline.md"]);
+        assert_eq!(second, ["Research/Notes/Outline (2).md"]);
+        assert_eq!(fs::read_to_string(source).unwrap(), "# Original");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn identities_follow_external_renames() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.md");
+        let b = dir.path().join("b.md");
+        fs::write(&a, "content").unwrap();
+        let original = file_identity(&a);
+        assert!(original.is_some());
+        fs::rename(&a, &b).unwrap();
+        assert_eq!(original, file_identity(&b));
+        let folder = dir.path().join("folder");
+        fs::create_dir(&folder).unwrap();
+        let identity = file_identity(&folder);
+        assert!(identity.is_some());
+        let moved = dir.path().join("moved");
+        fs::rename(&folder, &moved).unwrap();
+        assert_eq!(identity, file_identity(&moved));
     }
 }
