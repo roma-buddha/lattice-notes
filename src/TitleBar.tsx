@@ -79,8 +79,13 @@ export function TitleBar({
         dropTab(transfer, before);
       } else {
         const raw = event.dataTransfer.getData("application/x-lotus-note") || event.dataTransfer.getData("text/plain");
-        const payload = raw ? JSON.parse(raw) as { path?: string; kind?: string } : null;
-        const path = payload?.kind === "note" ? payload.path : event.dataTransfer.getData("text/notus-kind") === "note" ? event.dataTransfer.getData("text/notus-path") : "";
+        let payload: { path?: string; kind?: string } | null = null;
+        try {
+          payload = raw ? JSON.parse(raw) as { path?: string; kind?: string } : null;
+        } catch {
+          payload = null;
+        }
+        const path = payload?.kind === "note" && typeof payload.path === "string" ? payload.path : event.dataTransfer.getData("text/notus-kind") === "note" ? event.dataTransfer.getData("text/notus-path") : "";
         if (path) dropTab({ path }, before);
       }
     } catch {
@@ -182,7 +187,8 @@ export function TitleBar({
           if (
             event.dataTransfer.types.includes("application/notus-tab") ||
             event.dataTransfer.types.includes("application/x-lotus-note") ||
-            event.dataTransfer.types.includes("notus-note")
+            event.dataTransfer.types.includes("notus-note") ||
+            event.dataTransfer.types.includes("text/plain")
           ) {
             event.preventDefault();
             event.dataTransfer.dropEffect = event.dataTransfer.types.includes("notus-note") ? "copy" : "move";
@@ -209,7 +215,8 @@ export function TitleBar({
               if (
                 event.dataTransfer.types.includes("application/notus-tab") ||
                 event.dataTransfer.types.includes("application/x-lotus-note") ||
-                event.dataTransfer.types.includes("notus-note")
+                event.dataTransfer.types.includes("notus-note") ||
+                event.dataTransfer.types.includes("text/plain")
               ) {
                 event.preventDefault();
                 event.stopPropagation();

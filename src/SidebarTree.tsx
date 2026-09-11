@@ -6,6 +6,32 @@ import { anchorAt, type Anchor, type InlineEdit } from "./sidebarTypes";
 
 const INITIAL_NOTE_ROWS = 250;
 const NOTE_ROW_STEP = 250;
+type DragPayload = { path: string; kind: Entry["kind"] };
+const lotusPayload = (event: React.DragEvent): DragPayload | null => {
+  const raw =
+    event.dataTransfer.getData("application/x-lotus-note") ||
+    event.dataTransfer.getData("text/plain");
+  try {
+    const value = raw ? (JSON.parse(raw) as Partial<DragPayload>) : null;
+    if (
+      value &&
+      typeof value.path === "string" &&
+      ["vault", "folder", "note"].includes(value.kind ?? "")
+    )
+      return value as DragPayload;
+  } catch {
+    // Old WebView2 builds may expose only Lotus' legacy custom fields.
+  }
+  const path = event.dataTransfer.getData("text/notus-path");
+  const kind = event.dataTransfer.getData("text/notus-kind") as Entry["kind"];
+  return path && ["vault", "folder", "note"].includes(kind)
+    ? { path, kind }
+    : null;
+};
+const mayBeLotusDrag = (event: React.DragEvent) =>
+  ["application/x-lotus-note", "notus-note", "notus-folder", "text/plain"].some(
+    (type) => event.dataTransfer.types.includes(type),
+  );
 export function InlineName({
   value,
   error,
@@ -160,9 +186,7 @@ export function SidebarTree(props: Props) {
                 event.dataTransfer.effectAllowed = "copyMove";
               }}
               onDragOver={(event) => {
-                const kind = event.dataTransfer.getData("text/notus-kind");
-                const noteDrag = kind === "note" || event.dataTransfer.types.includes("notus-note") || event.dataTransfer.types.includes("application/x-lotus-note");
-                if (entry.kind === "note" && noteDrag) {
+                if (entry.kind === "note" && mayBeLotusDrag(event)) {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                   setInsert({ path: entry.path, before: event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 });
@@ -170,11 +194,8 @@ export function SidebarTree(props: Props) {
                   return;
                 }
                 if (
-                  ((entry.kind === "folder" &&
-                    event.dataTransfer.types.includes("notus-note")) ||
-                    (entry.kind === "vault" &&
-                      event.dataTransfer.types.includes("notus-folder"))) &&
-                  event.dataTransfer.types.includes("text/notus-path")
+                  (entry.kind === "folder" || entry.kind === "vault") &&
+                  mayBeLotusDrag(event)
                 ) {
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
@@ -191,8 +212,9 @@ export function SidebarTree(props: Props) {
                 event.preventDefault();
                 event.stopPropagation();
                 setOver("");
-                const path = event.dataTransfer.getData("text/notus-path");
-                const kind = event.dataTransfer.getData("text/notus-kind");
+                const payload = lotusPayload(event);
+                const path = payload?.path;
+                const kind = payload?.kind;
                 if (entry.kind === "note" && kind === "note" && path) {
                   const current = insert;
                   const notes = matching.filter((candidate) => candidate.kind === "note");
