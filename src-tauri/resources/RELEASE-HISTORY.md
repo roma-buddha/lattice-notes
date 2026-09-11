@@ -2,6 +2,13 @@
 
 This is Lotus’s built-in release record. It is stored with the application, not in a vault, and opens read-only from **Settings → About**.
 
+## 0.14.5 — Local model restart
+
+- Lotus now remembers the approved GGUF path alongside the runtime model ID.
+- A saved Lotus local model automatically starts again when you send a chat request after restarting the app.
+- Older local connections are migrated by locating their GGUF in the approved model folders.
+- This fixes the mismatch where llama.cpp reported a full-path model ID while Lotus later attempted to chat using only the filename.
+
 ## 0.14.4 — Local reliability
 
 - Fixed Lotus local-runtime model IDs so llama.cpp receives the actual ID reported by its server.

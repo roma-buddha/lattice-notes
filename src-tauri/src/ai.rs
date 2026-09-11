@@ -20,6 +20,8 @@ struct Secret {
     name: String,
     #[serde(default)]
     base_url: String,
+    #[serde(default)]
+    runtime_path: String,
 }
 #[derive(Serialize)]
 pub struct Connection {
@@ -284,12 +286,34 @@ pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String,
             // for a non-existent model and fail despite a healthy server.
             let model = models.into_iter().next().ok_or("The Lotus runtime did not report a model.")?;
             let display = file.file_stem().and_then(|value| value.to_str()).unwrap_or("Local GGUF").to_string();
-            entry("lotus")?.set_password(&serde_json::to_string(&Secret { key: String::new(), model, name: format!("Lotus local runtime · {display}"), base_url: destination }).map_err(|_| "Cannot save local runtime connection.")?).map_err(|_| "Could not save the local runtime connection.")?;
+            entry("lotus")?.set_password(&serde_json::to_string(&Secret { key: String::new(), model, name: format!("Lotus local runtime · {display}"), base_url: destination, runtime_path: file.to_string_lossy().to_string() }).map_err(|_| "Cannot save local runtime connection.")?).map_err(|_| "Could not save the local runtime connection.")?;
             return Ok(display);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     Err("The Lotus local runtime did not become ready. The GGUF may be too large for available memory.".into())
+}
+fn saved_lotus_model_file(app: &tauri::AppHandle, saved: &Secret) -> Result<String, String> {
+    for candidate in [&saved.runtime_path, &saved.model] {
+        if !candidate.is_empty() && approved_file(app, candidate).is_ok() {
+            return Ok(candidate.clone());
+        }
+    }
+    // Migrate releases that stored only the GGUF filename as the model ID.
+    let wanted = Path::new(&saved.model).file_stem().and_then(|value| value.to_str())
+        .unwrap_or(&saved.model).to_ascii_lowercase();
+    let mut files = Vec::new();
+    for root in approved_roots(app)? { collect_library(&root, &root, &mut files)?; }
+    files.into_iter().find(|file| {
+        Path::new(&file.name).file_stem().and_then(|value| value.to_str())
+            .is_some_and(|stem| stem.eq_ignore_ascii_case(&wanted))
+    }).map(|file| file.path).ok_or("The saved local model file was not found. Open Settings → AI models → Local and run the GGUF in Lotus again.".into())
+}
+async fn ensure_lotus_runtime(app: tauri::AppHandle, saved: &Secret) -> Result<(), String> {
+    let destination = endpoint("lotus", "")?;
+    if models("lotus", "", &destination).await.is_ok() { return Ok(()); }
+    let file = saved_lotus_model_file(&app, saved)?;
+    ai_run_lotus(app, file).await.map(|_| ())
 }
 #[tauri::command]
 pub fn ai_stop_lotus() -> Result<(), String> {
@@ -569,6 +593,7 @@ pub async fn ai_save(
                 model,
                 name,
                 base_url: destination,
+                runtime_path: String::new(),
             })
             .map_err(|_| "Cannot save connection.")?,
         )
@@ -734,6 +759,7 @@ async fn summarize_local(
 }
 #[tauri::command]
 pub async fn ai_chat(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     provider: String,
     messages: Vec<Message>,
@@ -746,6 +772,7 @@ pub async fn ai_chat(
     // contract was understood. This also handles an orphaned local runtime
     // surviving an application restart.
     let model = if provider == "lotus" {
+        ensure_lotus_runtime(app, &saved).await?;
         let available = models(&provider, "", &destination).await?;
         if available.iter().any(|id| id == &saved.model) { saved.model.clone() }
         else { available.into_iter().next().ok_or("The Lotus local runtime did not report a model.")? }
