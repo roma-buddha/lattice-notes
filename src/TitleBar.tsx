@@ -16,7 +16,7 @@ import {
 import { api, stem } from "./notus";
 import logo from "../icon.svg";
 export type TabTransfer = { path: string; source?: string; id?: number; targetX?: number };
-export type NoteTab = { id: number; path: string | null; organizer?: boolean };
+export type NoteTab = { id: number; path: string | null; organizer?: boolean; release?: boolean };
 export function TitleBar({
   sidebar,
   toggleSidebar,
@@ -55,6 +55,8 @@ export function TitleBar({
   const [insert, setInsert] = useState<{ id: number; before: boolean } | null>(null);
   const strip = useRef<HTMLDivElement>(null);
   const handledDrag = useRef<number | null>(null);
+  const pointerTab = useRef<{ id: number; pointerId: number; startX: number; startY: number; active: boolean } | null>(null);
+  const suppressTabClick = useRef(false);
   useEffect(() => {
     const element = strip.current;
     if (!element) return;
@@ -222,7 +224,44 @@ export function TitleBar({
               e.preventDefault();
               tabContext(tab.id, e);
             }}
-            draggable={!!tab.path}
+            draggable={false}
+            onPointerDown={(event) => {
+              if (!tab.path || event.button !== 0 || (event.target as HTMLElement).closest(".tab-close")) return;
+              pointerTab.current = { id: tab.id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false };
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              const drag = pointerTab.current;
+              if (!drag || drag.pointerId !== event.pointerId) return;
+              if (!drag.active) {
+                if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 7) return;
+                drag.active = true;
+                suppressTabClick.current = true;
+              }
+              const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-tab-id]");
+              if (!target) return;
+              const targetId = Number(target.dataset.tabId);
+              if (!Number.isFinite(targetId) || targetId === drag.id) return;
+              const rect = target.getBoundingClientRect();
+              setInsert({ id: targetId, before: event.clientX < rect.left + rect.width / 2 });
+            }}
+            onPointerUp={(event) => {
+              const drag = pointerTab.current;
+              if (!drag || drag.pointerId !== event.pointerId) return;
+              pointerTab.current = null;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+              if (!drag.active) return;
+              const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-tab-id]");
+              const targetId = Number(target?.dataset.tabId);
+              if (Number.isFinite(targetId) && targetId !== drag.id) {
+                const rect = target!.getBoundingClientRect();
+                const index = tabs.findIndex((candidate) => candidate.id === targetId);
+                const before = event.clientX < rect.left + rect.width / 2 ? targetId : tabs[index + 1]?.id;
+                dropTab({ id: drag.id, path: tab.path!, source: getCurrentWindow().label }, before);
+              }
+              setInsert(null);
+              window.setTimeout(() => { suppressTabClick.current = false; }, 0);
+            }}
             onDragOver={(event) => {
               if (
                 event.dataTransfer.types.includes("application/notus-tab") ||
@@ -273,7 +312,10 @@ export function TitleBar({
               aria-controls="editor-workspace"
               tabIndex={tab.id === active ? 0 : -1}
               title={tab.path ?? "Organize workspace"}
-              onClick={() => selectTab(tab.id)}
+              onClick={(event) => {
+                if (suppressTabClick.current) { event.preventDefault(); return; }
+                selectTab(tab.id);
+              }}
               onKeyDown={(event) => {
                 if (
                   ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
@@ -298,12 +340,12 @@ export function TitleBar({
               }}
             >
               <FileText size={14} />
-              <span>{tab.path ? stem(tab.path) : "Organizer"}</span>
+              <span>{tab.path ? stem(tab.path) : tab.release ? "Release history" : "Organizer"}</span>
             </button>
             {
               <button
                 className="tab-close"
-                aria-label={`Close tab ${tab.path ? stem(tab.path) : "Organizer"}`}
+                aria-label={`Close tab ${tab.path ? stem(tab.path) : tab.release ? "Release history" : "Organizer"}`}
                 onClick={() => closeTab(tab.id)}
               >
                 <X size={13} />

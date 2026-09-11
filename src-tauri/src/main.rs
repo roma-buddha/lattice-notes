@@ -88,6 +88,13 @@ fn tab_drop_target(
     }))
 }
 
+#[tauri::command]
+fn release_history(app: tauri::AppHandle) -> Result<String, String> {
+    let path = app.path().resource_dir().map_err(|e| e.to_string())?
+        .join("resources").join("RELEASE-HISTORY.md");
+    fs::read_to_string(path).map_err(|_| "Lotus release history is unavailable. Reinstall Lotus and try again.".into())
+}
+
 #[derive(Clone, serde::Serialize)]
 struct WorkspaceChange {
     structural: bool,
@@ -545,6 +552,7 @@ fn main() {
             windows::focus_main,
             register_tab_strip,
             tab_drop_target,
+            release_history,
             windows::list_trash,
             windows::restore_trash,
             windows::purge_trash,

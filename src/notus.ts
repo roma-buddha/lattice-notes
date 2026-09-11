@@ -75,6 +75,7 @@ export const api = {
   registerTabStrip: (bounds: { x: number; y: number; width: number; height: number }) =>
     invoke<void>("register_tab_strip", { bounds }),
   tabDropTarget: () => invoke<{ label: string; client_x: number } | null>("tab_drop_target"),
+  releaseHistory: () => invoke<string>("release_history"),
 };
 export type Conversion = {
   source: string;

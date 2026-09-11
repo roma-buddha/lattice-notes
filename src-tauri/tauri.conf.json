@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Lotus",
-  "version": "0.14.3",
+  "version": "0.14.4",
   "identifier": "app.notus.desktop",
   "build": {
     "beforeDevCommand": "npm run dev:web",
@@ -29,7 +29,7 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
-    "resources": ["resources/llama"],
+    "resources": ["resources/llama", "resources/RELEASE-HISTORY.md"],
     "shortDescription": "A quiet place for your notes.",
     "category": "Productivity",
     "windows": {

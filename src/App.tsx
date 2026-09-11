@@ -197,6 +197,7 @@ export default function App() {
   const [selected, setSelected] = useState("");
   const [doc, setDoc] = useState<Document | null>(null);
   const [draft, setDraft] = useState("");
+  const [releaseHistory, setReleaseHistory] = useState("");
   const [appearance, setAppearance] = useNoteAppearance(
     snapshot.root,
     doc?.path ?? "",
@@ -387,6 +388,7 @@ export default function App() {
   const activeVault = visibleEntries.find((e) => e.path === vaultPath);
   const organizerActive =
     tabs.find((t) => t.id === activeTab)?.organizer === true;
+  const releaseActive = tabs.find((t) => t.id === activeTab)?.release === true;
   const files = useMemo(() => flatten(visibleEntries), [visibleEntries]);
   const selectedEntry = files.find((e) => e.path === selected);
   const folder =
@@ -1291,6 +1293,13 @@ export default function App() {
       if (!(await saveAll())) return;
       const tab = tabs.find((t) => t.id === id);
       if (!tab) return;
+      if (tab.release) {
+        if (!releaseHistory) setReleaseHistory(await api.releaseHistory());
+        activeTabRef.current = id;
+        setActiveTab(id);
+        resetDocument();
+        return;
+      }
       const next = tab.path ? await api.read(tab.path) : null;
       activeTabRef.current = id;
       setActiveTab(id);
@@ -1375,6 +1384,18 @@ export default function App() {
     }
     const id = ++tabSequence.current;
     setTabs((previous) => [...previous, { id, path: null, organizer: true }]);
+    activeTabRef.current = id;
+    setActiveTab(id);
+    resetDocument();
+    setSettings(false);
+  };
+  const openReleaseHistory = async () => {
+    if (!(await saveAll())) return;
+    const content = await api.releaseHistory();
+    setReleaseHistory(content);
+    const existing = tabs.find((tab) => tab.release);
+    const id = existing?.id ?? ++tabSequence.current;
+    if (!existing) setTabs((previous) => [...previous, { id, path: null, release: true }]);
     activeTabRef.current = id;
     setActiveTab(id);
     resetDocument();
@@ -1490,11 +1511,39 @@ export default function App() {
   };
   const move = async (source: string, parent: string) => {
     setNotice("");
-    if (!(await saveAll()))
-      throw new Error("Save or recover the current draft first.");
-    const next = await api.relocate(source, parent, source.split("/").at(-1)!);
-    await afterRelocate(source, next);
-    setNotice("Moved successfully.");
+    const before = snapshot;
+    const name = source.split("/").at(-1)!;
+    const next = parent ? `${parent}/${name}` : name;
+    const moveVisible = (entries: Entry[]): Entry[] => {
+      let moving: Entry | null = null;
+      const remove = (items: Entry[]): Entry[] => items.flatMap((entry) => {
+        if (entry.path === source) { moving = entry; return []; }
+        return [{ ...entry, children: remove(entry.children) }];
+      });
+      const without = remove(entries);
+      if (!moving) return entries;
+      const insert = (items: Entry[]): Entry[] => items.map((entry) =>
+        entry.path === parent
+          ? { ...entry, children: [...entry.children, { ...moving!, path: next }] }
+          : { ...entry, children: insert(entry.children) },
+      );
+      return insert(without);
+    };
+    // Move the row immediately. The filesystem operation then confirms or
+    // rolls back the optimistic result instead of making the sidebar feel hung.
+    setSnapshot((currentSnapshot) => ({ ...currentSnapshot, entries: moveVisible(currentSnapshot.entries) }));
+    setSelected(next);
+    setNotice("Moving…");
+    try {
+      if (!(await saveAll())) throw new Error("Save or recover the draft first.");
+      const actual = await api.relocate(source, parent, name);
+      await afterRelocate(source, actual);
+      setNotice("Moved successfully.");
+    } catch (error) {
+      setSnapshot(before);
+      setSelected(source);
+      throw error;
+    }
   };
   const reorderNote = async (source: string, parent: string, before: string | null) => {
     setNotice("");
@@ -2270,6 +2319,17 @@ export default function App() {
               open={openNote}
               actions={showActions}
             /></Suspense>
+          ) : releaseActive ? (
+            <section className="note-view release-history-view">
+              <div className="document-scroll primary-pane" style={{ "--note-font-size": `${fontSize}px`, "--note-font-weight": fontWeight, "--note-text-align": appearance.alignment, "--note-font-family": `"${fontFamily}", sans-serif` } as React.CSSProperties}>
+                <Suspense fallback={<div className="empty-note"><p>Loading release history…</p></div>}><MarkdownView
+                  content={releaseHistory}
+                  identity="lotus-release-history"
+                  appearance={appearance}
+                  openLink={(href) => run(() => openLink(href))}
+                /></Suspense>
+              </div>
+            </section>
           ) : doc ? (
             <section className="note-view">
               <div className="note-ai-layout">
@@ -3637,6 +3697,7 @@ export default function App() {
           onClose={() => { setSettings(false); setAiSettings(false); }}
           changeRoot={changeRoot}
           refresh={refresh}
+          openReleaseHistory={openReleaseHistory}
         /></Suspense>
       )}
       {notice && (

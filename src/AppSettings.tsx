@@ -23,6 +23,7 @@ export function AppSettings({
   onClose,
   changeRoot,
   refresh,
+  openReleaseHistory,
   initialTab,
 }: {
   root: string;
@@ -32,6 +33,7 @@ export function AppSettings({
   onClose: () => void;
   changeRoot: () => Promise<void>;
   refresh: () => Promise<unknown>;
+  openReleaseHistory: () => Promise<void>;
   initialTab?: "AI models";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -173,6 +175,7 @@ export function AppSettings({
               <p>Lotus is a local-first workspace for Markdown notes. Your notes remain in the folders you choose on this computer.</p>
               <h4>Release</h4>
               <p>Lotus {release.version}</p>
+              <button type="button" onClick={() => void openReleaseHistory()}>View complete release history</button>
               <h4>Privacy</h4>
               <p>Lotus does not run its own cloud for your notes or store their contents elsewhere. It reads and writes only the local vault you open.</p>
               <h4>AI models</h4>

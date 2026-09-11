@@ -159,8 +159,11 @@ fn secret(provider: &str) -> Result<Secret, String> {
     serde_json::from_str(&raw).map_err(|_| "Please save this connection again.".into())
 }
 fn client() -> Result<reqwest::Client, String> {
+    client_with_timeout(Duration::from_secs(90))
+}
+fn client_with_timeout(timeout: Duration) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .timeout(Duration::from_secs(90))
+        .timeout(timeout)
         .connect_timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -275,10 +278,14 @@ pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String,
     }
     let destination = endpoint("lotus", "")?;
     for _ in 0..40 {
-        if models("lotus", "", &destination).await.is_ok() {
-            let model = file.file_stem().and_then(|value| value.to_str()).unwrap_or("Local GGUF").to_string();
-            entry("lotus")?.set_password(&serde_json::to_string(&Secret { key: String::new(), model: model.clone(), name: "Lotus local runtime".into(), base_url: destination }).map_err(|_| "Cannot save local runtime connection.")?).map_err(|_| "Could not save the local runtime connection.")?;
-            return Ok(model);
+        if let Ok(models) = models("lotus", "", &destination).await {
+            // llama-server reports the model by its full path, not by the GGUF
+            // filename. Saving the filename made every later chat request ask
+            // for a non-existent model and fail despite a healthy server.
+            let model = models.into_iter().next().ok_or("The Lotus runtime did not report a model.")?;
+            let display = file.file_stem().and_then(|value| value.to_str()).unwrap_or("Local GGUF").to_string();
+            entry("lotus")?.set_password(&serde_json::to_string(&Secret { key: String::new(), model, name: format!("Lotus local runtime · {display}"), base_url: destination }).map_err(|_| "Cannot save local runtime connection.")?).map_err(|_| "Could not save the local runtime connection.")?;
+            return Ok(display);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -669,11 +676,15 @@ async fn complete(
     // runtime more output room, but never accept a truncated edit in parse_reply.
     let max_tokens = output_tokens.unwrap_or_else(|| {
         if provider == "lotus" {
-            if edit { 2048 } else { 1024 }
+            // The bundled CPU runtime is intentionally local-first. A concise
+            // default finishes promptly instead of hitting the remote-provider
+            // timeout on otherwise healthy models.
+            if edit { 1024 } else { 384 }
         } else { 4096 }
     });
     let body = json!({"model":model,"messages":payload,"max_tokens":max_tokens,"stream":false});
-    let request = client()?.post(format!("{destination}/chat/completions")).json(&body);
+    let request = (if provider == "lotus" { client_with_timeout(Duration::from_secs(300))? } else { client()? })
+        .post(format!("{destination}/chat/completions")).json(&body);
     let request = if key.is_empty() { request } else { request.bearer_auth(key) };
     let data = response(request.send()
             .await
@@ -731,6 +742,14 @@ pub async fn ai_chat(
 ) -> Result<Reply, String> {
     let saved = secret(&provider)?;
     let destination = endpoint(&provider, &saved.base_url)?;
+    // Repair existing Lotus connections made before the runtime's model-ID
+    // contract was understood. This also handles an orphaned local runtime
+    // surviving an application restart.
+    let model = if provider == "lotus" {
+        let available = models(&provider, "", &destination).await?;
+        if available.iter().any(|id| id == &saved.model) { saved.model.clone() }
+        else { available.into_iter().next().ok_or("The Lotus local runtime did not report a model.")? }
+    } else { saved.model.clone() };
     let id = window.label().to_string();
     let (sender, mut receiver) = tokio::sync::watch::channel(false);
     {
@@ -745,9 +764,9 @@ pub async fn ai_chat(
         _ = receiver.changed() => Err("Request stopped. No note was changed.".into()),
         result = async {
             if provider == "lotus" && !edit && context.as_ref().is_some_and(|value| value.len() > 9_000) {
-                summarize_local(&provider, &destination, &saved.key, &saved.model, messages, context.unwrap()).await
+                summarize_local(&provider, &destination, &saved.key, &model, messages, context.unwrap()).await
             } else {
-                complete(&provider, &destination, &saved.key, &saved.model, messages, context, edit, None).await
+                complete(&provider, &destination, &saved.key, &model, messages, context, edit, None).await
             }
         } => result,
     };
