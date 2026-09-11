@@ -379,6 +379,24 @@ kbd {
   border-radius: 2px;
   z-index: 2;
 }
+.tree-row.pointer-dragging { opacity: .45; }
+.tree-row.pointer-drop-before,
+.tree-row.pointer-drop-after { position: relative; }
+.tree-row.pointer-drop-before::before,
+.tree-row.pointer-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 3px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  z-index: 4;
+}
+.tree-row.pointer-drop-before::before { top: -1px; }
+.tree-row.pointer-drop-after::after { bottom: -1px; }
+.tree-row.pointer-drop-target,
+.tab-strip.pointer-drop-target { outline: 1px solid var(--accent); background: var(--soft); }
 .tree-row.drop-insert-before::before { top: -1px; }
 .tree-row.drop-insert-after::after { bottom: -1px; }
 .tree-select {

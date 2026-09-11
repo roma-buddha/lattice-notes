@@ -124,6 +124,15 @@ export function SidebarTree(props: Props) {
   const [over, setOver] = useState("");
   const [insert, setInsert] = useState<{ path: string; before: boolean } | null>(null);
   const [noteRows, setNoteRows] = useState(INITIAL_NOTE_ROWS);
+  const pointerDrag = useRef<{
+    path: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const suppressClick = useRef(false);
+  const [pointerDragging, setPointerDragging] = useState("");
   const matches = (entry: Entry): boolean =>
     entry.name.toLowerCase().includes(query.toLowerCase()) ||
     entry.children.some(matches);
@@ -148,9 +157,95 @@ export function SidebarTree(props: Props) {
           >
             <div
               data-path={entry.path}
-              className={`tree-row kind-${entry.kind} ${selected === entry.path ? "selected" : ""} ${over === entry.path || externalDropTarget === entry.path ? "drop-target" : ""} ${insert?.path === entry.path ? (insert.before ? "drop-insert-before" : "drop-insert-after") : ""}`}
+              data-kind={entry.kind}
+              data-parent={parent}
+              className={`tree-row kind-${entry.kind} ${pointerDragging === entry.path ? "pointer-dragging" : ""} ${selected === entry.path ? "selected" : ""} ${over === entry.path || externalDropTarget === entry.path ? "drop-target" : ""} ${insert?.path === entry.path ? (insert.before ? "drop-insert-before" : "drop-insert-after") : ""}`}
               style={{ paddingLeft: 6 + depth * 16 }}
-              draggable={entry.kind !== "vault" && !inline}
+              // Notes use pointer capture below.  Native HTML dragging is not
+              // reliable in WebView2: it may never enter the drop targets.
+              draggable={entry.kind === "folder" && !inline}
+              onPointerDown={(event) => {
+                if (
+                  entry.kind !== "note" ||
+                  inline ||
+                  event.button !== 0 ||
+                  (event.target as HTMLElement).closest(".twisty, .row-actions, input")
+                )
+                  return;
+                pointerDrag.current = {
+                  path: entry.path,
+                  pointerId: event.pointerId,
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  active: false,
+                };
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                const drag = pointerDrag.current;
+                if (!drag || drag.pointerId !== event.pointerId) return;
+                if (!drag.active) {
+                  if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 7)
+                    return;
+                  drag.active = true;
+                  suppressClick.current = true;
+                  setPointerDragging(drag.path);
+                }
+                const target = document.elementFromPoint(event.clientX, event.clientY)
+                  ?.closest<HTMLElement>("[data-path], [data-lotus-drop='tabs']");
+                document.querySelectorAll(".pointer-drop-before, .pointer-drop-after, .pointer-drop-target").forEach((element) =>
+                  element.classList.remove("pointer-drop-before", "pointer-drop-after", "pointer-drop-target"),
+                );
+                if (!target || target.dataset.path === drag.path) return;
+                if (target.dataset.lotusDrop === "tabs") {
+                  target.classList.add("pointer-drop-target");
+                } else if (target.dataset.kind === "note") {
+                  const rect = target.getBoundingClientRect();
+                  target.classList.add(event.clientY < rect.top + rect.height / 2 ? "pointer-drop-before" : "pointer-drop-after");
+                } else if (target.dataset.kind === "folder") {
+                  target.classList.add("pointer-drop-target");
+                }
+              }}
+              onPointerUp={(event) => {
+                const drag = pointerDrag.current;
+                if (!drag || drag.pointerId !== event.pointerId) return;
+                pointerDrag.current = null;
+                if (event.currentTarget.hasPointerCapture(event.pointerId))
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                document.querySelectorAll(".pointer-drop-before, .pointer-drop-after, .pointer-drop-target").forEach((element) =>
+                  element.classList.remove("pointer-drop-before", "pointer-drop-after", "pointer-drop-target"),
+                );
+                setPointerDragging("");
+                if (!drag.active) return;
+                const target = document.elementFromPoint(event.clientX, event.clientY)
+                  ?.closest<HTMLElement>("[data-path], [data-lotus-drop='tabs']");
+                if (target?.dataset.lotusDrop === "tabs") {
+                  window.dispatchEvent(new CustomEvent("lotus-note-pointer-drop", { detail: { path: drag.path } }));
+                } else if (target?.dataset.kind === "note") {
+                  const targetPath = target.dataset.path!;
+                  const targetParent = target.dataset.parent ?? "";
+                  const rect = target.getBoundingClientRect();
+                  const before = event.clientY < rect.top + rect.height / 2
+                    ? targetPath
+                    : (() => {
+                        const rows = [...document.querySelectorAll<HTMLElement>(`[data-kind='note'][data-parent='${CSS.escape(targetParent)}']`)];
+                        return rows[rows.findIndex((row) => row.dataset.path === targetPath) + 1]?.dataset.path ?? null;
+                      })();
+                  if (targetPath !== drag.path) onReorder(drag.path, targetParent, before);
+                } else if (target?.dataset.kind === "folder") {
+                  const destination = target.dataset.path;
+                  if (destination) onMove(drag.path, destination);
+                }
+                window.setTimeout(() => { suppressClick.current = false; }, 0);
+              }}
+              onPointerCancel={() => {
+                pointerDrag.current = null;
+                suppressClick.current = false;
+                setPointerDragging("");
+                document.querySelectorAll(".pointer-drop-before, .pointer-drop-after, .pointer-drop-target").forEach((element) =>
+                  element.classList.remove("pointer-drop-before", "pointer-drop-after", "pointer-drop-target"),
+                );
+              }}
               onContextMenu={(event) => {
                 if ((event.target as HTMLElement).closest("input")) return;
                 event.preventDefault();
@@ -257,7 +352,14 @@ export function SidebarTree(props: Props) {
                     className="tree-select"
                     title={entry.path}
                     aria-current={selected === entry.path ? "page" : undefined}
-                    onClick={() => onSelect(entry)}
+                    onClick={(event) => {
+                      if (suppressClick.current) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        return;
+                      }
+                      onSelect(entry);
+                    }}
                   >
                     <span>
                       {entry.kind === "note" ? stem(entry.name) : entry.name}

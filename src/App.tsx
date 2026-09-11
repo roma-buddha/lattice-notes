@@ -2256,7 +2256,7 @@ export default function App() {
           {loading ? (
             <div className="empty-note lotus-loading" role="status" aria-live="polite">
               <span className="lotus-loading-mark" aria-hidden="true">✦</span>
-              <p>Opening Lotus<span className="lotus-loading-dots" aria-hidden="true">…</span></p>
+              <p>Loading<span className="lotus-loading-dots" aria-hidden="true">…</span></p>
             </div>
           ) : organizerActive ? (
             <Suspense fallback={<div className="empty-note"><p>Opening workspace…</p></div>}><WorkspaceOrganizer

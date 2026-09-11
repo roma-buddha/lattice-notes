@@ -34,9 +34,10 @@ type Context = {
   index: number;
   selected: [number, number];
   extent: [number, number];
-  mode: "cell" | "row" | "column";
+  mode: "cell" | "row" | "column" | "none";
   editors: Map<HTMLElement, EditorView>;
   syncing: boolean;
+  dispose: () => void;
 };
 const contexts = new WeakMap<HTMLElement, Context>();
 class TableWidget extends WidgetType {
@@ -63,6 +64,7 @@ class TableWidget extends WidgetType {
       mode: "cell",
       editors: new Map(),
       syncing: false,
+      dispose: () => {},
     };
     contexts.set(root, ctx);
     const commit = () => {
@@ -133,6 +135,20 @@ class TableWidget extends WidgetType {
       ctx.mode = mode;
       paint();
     };
+    const clearSelection = () => {
+      ctx.selected = [-1, -1];
+      ctx.extent = [-1, -1];
+      ctx.mode = "none";
+      root.querySelectorAll(".editing-cell").forEach((cell) => cell.classList.remove("editing-cell"));
+      paint();
+    };
+    const clearWhenOutside = (event: PointerEvent) => {
+      if (!root.contains(event.target as Node)) clearSelection();
+    };
+    // A table's selection is visual widget state. Focus events do not cover a
+    // click in the surrounding note, so clear it at capture time instead.
+    window.addEventListener("pointerdown", clearWhenOutside, true);
+    ctx.dispose = () => window.removeEventListener("pointerdown", clearWhenOutside, true);
     let dragging: "row" | "column" | "cell" | null = null;
     root.onpointerup = () => (dragging = null);
     const menu = (event: MouseEvent | KeyboardEvent) => {
@@ -652,7 +668,9 @@ class TableWidget extends WidgetType {
     return true;
   }
   destroy(dom: HTMLElement) {
-    contexts.get(dom)?.editors.forEach((editor) => editor.destroy());
+    const ctx = contexts.get(dom);
+    ctx?.dispose();
+    ctx?.editors.forEach((editor) => editor.destroy());
     contexts.delete(dom);
   }
   ignoreEvent() {

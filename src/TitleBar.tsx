@@ -67,6 +67,17 @@ export function TitleBar({
     observer.observe(element);
     return () => observer.disconnect();
   }, [active, tabs]);
+  useEffect(() => {
+    const receivePointerDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: unknown }>).detail;
+      if (typeof detail?.path !== "string" || !detail.path) return;
+      // This is deliberately separate from HTML DnD.  It is the dependable
+      // same-window route when WebView2 declines to surface DataTransfer data.
+      dropTab({ path: detail.path });
+    };
+    window.addEventListener("lotus-note-pointer-drop", receivePointerDrop);
+    return () => window.removeEventListener("lotus-note-pointer-drop", receivePointerDrop);
+  }, [dropTab]);
   const accept = (event: React.DragEvent, before?: number) => {
     event.preventDefault();
     event.stopPropagation();
@@ -177,6 +188,7 @@ export function TitleBar({
       <div
         className={`tab-strip ${dragOver ? "tab-drop-target" : ""}`}
         ref={strip}
+        data-lotus-drop="tabs"
         onWheel={(event) => {
           if (strip.current)
             strip.current.scrollLeft += event.deltaY || event.deltaX;
