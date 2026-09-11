@@ -13,9 +13,9 @@ import {
   Settings,
   X,
 } from "lucide-react";
-import { stem } from "./notus";
+import { api, stem } from "./notus";
 import logo from "../icon.svg";
-export type TabTransfer = { path: string; source?: string; id?: number };
+export type TabTransfer = { path: string; source?: string; id?: number; targetX?: number };
 export type NoteTab = { id: number; path: string | null; organizer?: boolean };
 export function TitleBar({
   sidebar,
@@ -25,7 +25,7 @@ export function TitleBar({
   selectTab,
   closeTab,
   dropTab,
-  detachTab,
+  finishTabDrag,
   theme,
   toggleTheme,
   onError,
@@ -41,7 +41,7 @@ export function TitleBar({
   selectTab: (id: number) => void;
   closeTab: (id: number) => void;
   dropTab: (transfer: TabTransfer, before?: number) => void;
-  detachTab: (id: number, atCursor: boolean) => void;
+  finishTabDrag: (id: number) => void;
   theme: "light" | "dark";
   toggleTheme: () => void;
   onError: (error: string) => void;
@@ -52,7 +52,9 @@ export function TitleBar({
 }) {
   const [maximized, setMaximized] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [insert, setInsert] = useState<{ id: number; before: boolean } | null>(null);
   const strip = useRef<HTMLDivElement>(null);
+  const handledDrag = useRef<number | null>(null);
   useEffect(() => {
     const element = strip.current;
     if (!element) return;
@@ -71,16 +73,42 @@ export function TitleBar({
     setDragOver(false);
     const value = event.dataTransfer.getData("application/notus-tab");
     try {
-      if (value) dropTab(JSON.parse(value) as TabTransfer, before);
-      else if (event.dataTransfer.getData("text/notus-kind") === "note")
-        dropTab(
-          { path: event.dataTransfer.getData("text/notus-path") },
-          before,
-        );
+      if (value) {
+        const transfer = JSON.parse(value) as TabTransfer;
+        handledDrag.current = transfer.id ?? null;
+        dropTab(transfer, before);
+      } else {
+        const raw = event.dataTransfer.getData("application/x-lotus-note") || event.dataTransfer.getData("text/plain");
+        const payload = raw ? JSON.parse(raw) as { path?: string; kind?: string } : null;
+        const path = payload?.kind === "note" ? payload.path : event.dataTransfer.getData("text/notus-kind") === "note" ? event.dataTransfer.getData("text/notus-path") : "";
+        if (path) dropTab({ path }, before);
+      }
     } catch {
       onError("Could not open the dragged tab.");
     }
   };
+  useEffect(() => {
+    const element = strip.current;
+    if (!element) return;
+    let frame = 0;
+    const report = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = element.getBoundingClientRect();
+        void api.registerTabStrip({ x: rect.left, y: rect.top, width: rect.width, height: rect.height }).catch(() => {});
+      });
+    };
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(element);
+    const window = getCurrentWindow();
+    const listeners = [window.onMoved(report), window.onResized(report)];
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      listeners.forEach((listener) => void listener.then((unlisten) => unlisten()));
+    };
+  }, []);
   useEffect(() => {
     let disposed = false;
     const window = getCurrentWindow();
@@ -153,6 +181,7 @@ export function TitleBar({
         onDragOver={(event) => {
           if (
             event.dataTransfer.types.includes("application/notus-tab") ||
+            event.dataTransfer.types.includes("application/x-lotus-note") ||
             event.dataTransfer.types.includes("notus-note")
           ) {
             event.preventDefault();
@@ -161,11 +190,14 @@ export function TitleBar({
           }
         }}
         onDragLeave={() => setDragOver(false)}
-        onDrop={(event) => accept(event)}
+        onDrop={(event) => {
+          setInsert(null);
+          accept(event);
+        }}
       >
         {tabs.map((tab) => (
           <div
-            className={`note-tab ${tab.id === active ? "active" : ""}`}
+            className={`note-tab ${tab.id === active ? "active" : ""} ${insert?.id === tab.id ? (insert.before ? "tab-insert-before" : "tab-insert-after") : ""}`}
             key={tab.id}
             data-tab-id={tab.id}
             onContextMenu={(e) => {
@@ -173,6 +205,22 @@ export function TitleBar({
               tabContext(tab.id, e);
             }}
             draggable={!!tab.path}
+            onDragOver={(event) => {
+              if (
+                event.dataTransfer.types.includes("application/notus-tab") ||
+                event.dataTransfer.types.includes("application/x-lotus-note") ||
+                event.dataTransfer.types.includes("notus-note")
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                setInsert({ id: tab.id, before: event.clientX < rect.left + rect.width / 2 });
+              }
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node))
+                setInsert((current) => current?.id === tab.id ? null : current);
+            }}
             onDragStart={(event) => {
               event.dataTransfer.setData(
                 "application/notus-tab",
@@ -184,12 +232,21 @@ export function TitleBar({
               );
               event.dataTransfer.effectAllowed = "copyMove";
             }}
-            onDragEnd={(event) => {
+            onDragEnd={() => {
               setDragOver(false);
-              if (event.dataTransfer.dropEffect === "none")
-                detachTab(tab.id, true);
+              if (handledDrag.current === tab.id) {
+                handledDrag.current = null;
+                return;
+              }
+              finishTabDrag(tab.id);
             }}
-            onDrop={(event) => accept(event, tab.id)}
+            onDrop={(event) => {
+              const before = insert?.id === tab.id && !insert.before
+                ? tabs[tabs.findIndex((candidate) => candidate.id === tab.id) + 1]?.id
+                : tab.id;
+              setInsert(null);
+              accept(event, before);
+            }}
           >
             <button
               role="tab"

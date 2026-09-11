@@ -15,6 +15,77 @@ struct Store {
     config: PathBuf,
     views: Mutex<std::collections::HashMap<String, Vec<String>>>,
     watcher: Mutex<Option<RecommendedWatcher>>,
+    tab_strips: Mutex<std::collections::HashMap<String, TabStripBounds>>,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct TabStripBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    scale: f64,
+    client_origin_x: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct TabStripInput {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(serde::Serialize)]
+struct TabDropTarget {
+    label: String,
+    client_x: f64,
+}
+
+#[tauri::command]
+fn register_tab_strip(
+    window: tauri::WebviewWindow,
+    state: tauri::State<Store>,
+    bounds: TabStripInput,
+) -> Result<(), String> {
+    if bounds.width <= 0.0 || bounds.height <= 0.0 || !bounds.x.is_finite() || !bounds.y.is_finite() {
+        return Err("Invalid tab strip bounds.".into());
+    }
+    let origin = window.inner_position().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let physical = TabStripBounds {
+        x: origin.x as f64 + bounds.x * scale,
+        y: origin.y as f64 + bounds.y * scale,
+        width: bounds.width * scale,
+        height: bounds.height * scale,
+        scale,
+        client_origin_x: origin.x as f64,
+    };
+    state.tab_strips.lock().map_err(|e| e.to_string())?.insert(window.label().into(), physical);
+    Ok(())
+}
+
+#[tauri::command]
+fn tab_drop_target(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    state: tauri::State<Store>,
+) -> Result<Option<TabDropTarget>, String> {
+    let cursor = window.cursor_position().map_err(|e| e.to_string())?;
+    let source = window.label();
+    let mut strips = state.tab_strips.lock().map_err(|e| e.to_string())?;
+    strips.retain(|label, _| app.get_webview_window(label).is_some());
+    Ok(strips.iter().find_map(|(label, bounds)| {
+        (label != source
+            && cursor.x >= bounds.x
+            && cursor.y >= bounds.y
+            && cursor.x < bounds.x + bounds.width
+            && cursor.y < bounds.y + bounds.height)
+            .then(|| TabDropTarget {
+                label: label.clone(),
+                client_x: (cursor.x - bounds.client_origin_x) / bounds.scale,
+            })
+    }))
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -420,6 +491,7 @@ fn main() {
                 config,
                 views: Mutex::new(std::collections::HashMap::new()),
                 watcher: Mutex::new(None),
+                tab_strips: Mutex::new(std::collections::HashMap::new()),
             };
             watch_workspace(&app.handle(), &store).map_err(std::io::Error::other)?;
             app.manage(store);
@@ -471,6 +543,8 @@ fn main() {
             windows::register_view,
             windows::detach_note,
             windows::focus_main,
+            register_tab_strip,
+            tab_drop_target,
             windows::list_trash,
             windows::restore_trash,
             windows::purge_trash,

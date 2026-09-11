@@ -72,6 +72,7 @@ type Props = {
   onToggle: (path: string) => void;
   onSelect: (entry: Entry) => void;
   onMove: (source: string, parent: string) => void;
+  onReorder: (source: string, parent: string, before: string | null) => void;
   onActions: (entry: Entry, anchor: Anchor) => void;
   inline: InlineEdit | null;
   editor: React.ReactNode;
@@ -86,6 +87,7 @@ export function SidebarTree(props: Props) {
     onToggle,
     onSelect,
     onMove,
+    onReorder,
     onActions,
     inline,
     editor,
@@ -94,6 +96,7 @@ export function SidebarTree(props: Props) {
     parent = "",
   } = props;
   const [over, setOver] = useState("");
+  const [insert, setInsert] = useState<{ path: string; before: boolean } | null>(null);
   const [noteRows, setNoteRows] = useState(INITIAL_NOTE_ROWS);
   const matches = (entry: Entry): boolean =>
     entry.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -119,7 +122,7 @@ export function SidebarTree(props: Props) {
           >
             <div
               data-path={entry.path}
-              className={`tree-row kind-${entry.kind} ${selected === entry.path ? "selected" : ""} ${over === entry.path || externalDropTarget === entry.path ? "drop-target" : ""}`}
+              className={`tree-row kind-${entry.kind} ${selected === entry.path ? "selected" : ""} ${over === entry.path || externalDropTarget === entry.path ? "drop-target" : ""} ${insert?.path === entry.path ? (insert.before ? "drop-insert-before" : "drop-insert-after") : ""}`}
               style={{ paddingLeft: 6 + depth * 16 }}
               draggable={entry.kind !== "vault" && !inline}
               onContextMenu={(event) => {
@@ -148,12 +151,24 @@ export function SidebarTree(props: Props) {
                 }
               }}
               onDragStart={(event) => {
+                const payload = JSON.stringify({ path: entry.path, kind: entry.kind });
+                event.dataTransfer.setData("application/x-lotus-note", payload);
                 event.dataTransfer.setData("text/notus-path", entry.path);
                 event.dataTransfer.setData("text/notus-kind", entry.kind);
                 event.dataTransfer.setData(`notus-${entry.kind}`, "1");
+                event.dataTransfer.setData("text/plain", payload);
                 event.dataTransfer.effectAllowed = "copyMove";
               }}
               onDragOver={(event) => {
+                const kind = event.dataTransfer.getData("text/notus-kind");
+                const noteDrag = kind === "note" || event.dataTransfer.types.includes("notus-note") || event.dataTransfer.types.includes("application/x-lotus-note");
+                if (entry.kind === "note" && noteDrag) {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setInsert({ path: entry.path, before: event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 });
+                  setOver("");
+                  return;
+                }
                 if (
                   ((entry.kind === "folder" &&
                     event.dataTransfer.types.includes("notus-note")) ||
@@ -166,13 +181,28 @@ export function SidebarTree(props: Props) {
                   setOver(entry.path);
                 }
               }}
-              onDragLeave={() => setOver("")}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                  setOver("");
+                  setInsert((current) => current?.path === entry.path ? null : current);
+                }
+              }}
               onDrop={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
                 setOver("");
                 const path = event.dataTransfer.getData("text/notus-path");
                 const kind = event.dataTransfer.getData("text/notus-kind");
+                if (entry.kind === "note" && kind === "note" && path) {
+                  const current = insert;
+                  const notes = matching.filter((candidate) => candidate.kind === "note");
+                  const index = notes.findIndex((candidate) => candidate.path === entry.path);
+                  const before = current?.before ? entry.path : notes[index + 1]?.path ?? null;
+                  setInsert(null);
+                  onReorder(path, parent, before);
+                  return;
+                }
+                setInsert(null);
                 if (
                   path &&
                   ((entry.kind === "folder" && kind === "note") ||

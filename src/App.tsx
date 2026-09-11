@@ -317,6 +317,7 @@ export default function App() {
     revision: 0,
     areas: [],
     assignments: {},
+    orders: {},
   });
   const editorView = useRef<EditorView | null>(null);
   const [tableMenu, setTableMenu] = useState<{
@@ -955,7 +956,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [detached]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     storage.set("notus-theme", theme);
@@ -1305,14 +1306,19 @@ export default function App() {
       navigating.current = false;
     }
   };
-  const openExtraTab = async (path: string, preserveVault = false) => {
+  const openExtraTab = async (path: string, preserveVault = false, before?: number) => {
     if (!preserveVault) setVaultPath(path.split("/")[0]);
     if (!(await saveAll()))
       throw new Error("Save or recover the current draft first.");
     const next = await api.read(path);
     const existing = tabs.find((t) => t.path === path);
     const id = existing?.id ?? ++tabSequence.current;
-    if (!existing) setTabs((previous) => [...previous, { id, path }]);
+    if (!existing) setTabs((previous) => {
+      const next = [...previous];
+      const index = before === undefined ? -1 : next.findIndex((tab) => tab.id === before);
+      next.splice(index < 0 ? next.length : index, 0, { id, path });
+      return next;
+    });
     activeTabRef.current = id;
     setActiveTab(id);
     setTableActions(null);
@@ -1489,6 +1495,37 @@ export default function App() {
     const next = await api.relocate(source, parent, source.split("/").at(-1)!);
     await afterRelocate(source, next);
     setNotice("Moved successfully.");
+  };
+  const reorderNote = async (source: string, parent: string, before: string | null) => {
+    setNotice("");
+    if (before === source) return;
+    if (!(await saveAll())) throw new Error("Save or recover the current draft first.");
+    let path = source;
+    if (parentOf(source) !== parent) {
+      path = await api.relocate(source, parent, source.split("/").at(-1)!);
+      await afterRelocate(source, path);
+    }
+    // A cross-folder move updates organizer metadata in Rust, so always use a
+    // fresh snapshot/state before writing the final requested placement.
+    const currentOrganizer = await api.organizer();
+    const currentFiles = parentOf(source) === parent ? files : flatten((await api.snapshot()).entries);
+    const siblings = currentFiles
+      .filter((entry) => entry.kind === "note" && parentOf(entry.path) === parent)
+      .map((entry) => entry.path)
+      .filter((entry) => entry !== path);
+    const at = before ? siblings.indexOf(before) : -1;
+    siblings.splice(at < 0 ? siblings.length : at, 0, path);
+    const orders = { ...currentOrganizer.orders, [parent]: siblings };
+    setOrganizer(await api.saveOrganizer({ ...currentOrganizer, orders }));
+    await refresh();
+    setNotice("Note order saved.");
+  };
+  const resetNoteOrder = async (parent: string) => {
+    const orders = { ...organizer.orders };
+    delete orders[parent];
+    setOrganizer(await api.saveOrganizer({ ...organizer, orders }));
+    await refresh();
+    setNotice("Note order reset to alphabetical.");
   };
   const commitInline = async () => {
     if (!inline || inlineBusy.current) return;
@@ -1681,6 +1718,22 @@ export default function App() {
     if (detached && tabs.filter((t) => t.path).length === 1)
       await getCurrentWindow().destroy();
   };
+  const finishTabDrag = async (id: number) => {
+    const tab = tabs.find((item) => item.id === id);
+    if (!tab?.path) return;
+    const target = await api.tabDropTarget();
+    if (target) {
+      await emitTo(windowLabel, "notus-transfer-request", {
+        source: windowLabel,
+        id,
+        path: tab.path,
+        target: target.label,
+        targetX: target.client_x,
+      });
+      return;
+    }
+    await detachTab(id, true);
+  };
   const dropTab = async (transfer: TabTransfer, before?: number) => {
     if (transfer.source && transfer.source !== windowLabel) {
       await emitTo(transfer.source, "notus-transfer-request", {
@@ -1716,8 +1769,15 @@ export default function App() {
         target: "main",
       });
   };
-  const transferLive = useRef({ openExtraTab, closeTab, tabs });
-  transferLive.current = { openExtraTab, closeTab, tabs };
+  const beforeTabAt = (clientX: number) =>
+    tabs.find((tab) => {
+      const element = document.querySelector<HTMLElement>(`[data-tab-id="${tab.id}"]`);
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      return clientX < rect.left + rect.width / 2;
+    })?.id;
+  const transferLive = useRef({ openExtraTab, closeTab, tabs, beforeTabAt });
+  transferLive.current = { openExtraTab, closeTab, tabs, beforeTabAt };
   useEffect(() => {
     type Transfer = TabTransfer & { target: string };
     const listeners = [
@@ -1756,7 +1816,11 @@ export default function App() {
       listen<Transfer>("notus-transfer-ready", async ({ payload }) => {
         if (payload.target !== getCurrentWindow().label) return;
         try {
-          await transferLive.current.openExtraTab(payload.path);
+          await transferLive.current.openExtraTab(
+            payload.path,
+            true,
+            payload.targetX === undefined ? undefined : transferLive.current.beforeTabAt(payload.targetX),
+          );
           await emitTo(payload.source!, "notus-transfer-complete", payload);
         } catch (e) {
           setError(String(e));
@@ -1885,7 +1949,7 @@ export default function App() {
         selectTab={(id) => run(() => selectTab(id))}
         closeTab={(id) => run(() => closeTab(id))}
         dropTab={(transfer, before) => run(() => dropTab(transfer, before))}
-        detachTab={(id, atCursor) => run(() => detachTab(id, atCursor))}
+        finishTabDrag={(id) => run(() => finishTabDrag(id))}
         theme={theme}
         toggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
         onError={setError}
@@ -2111,6 +2175,7 @@ export default function App() {
                   else setSelected(entry.path);
                 }}
                 onMove={(source, parent) => run(() => move(source, parent))}
+                onReorder={(source, parent, before) => run(() => reorderNote(source, parent, before))}
                 externalDropTarget={externalDropTarget}
                 onActions={showActions}
                 inline={
@@ -3416,6 +3481,18 @@ export default function App() {
                         <FolderPlus size={15} />
                         New folder
                       </button>
+                      {organizer.orders[actions.entry.path] && (
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            const parent = actions.entry.path;
+                            setActions(null);
+                            run(() => resetNoteOrder(parent));
+                          }}
+                        >
+                          Reset note order
+                        </button>
+                      )}
                     </>
                   )}
                 </>

@@ -14,6 +14,10 @@ pub struct OrganizerState {
     pub revision: u64,
     pub areas: Vec<Area>,
     pub assignments: std::collections::BTreeMap<String, String>,
+    /// Optional user-defined note order, keyed by the containing folder.
+    /// Folders not present here continue to use the ordinary alphabetical order.
+    #[serde(default)]
+    pub orders: std::collections::BTreeMap<String, Vec<String>>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Area {
@@ -114,6 +118,22 @@ impl Workspace {
                 return Err("Choose an existing vault and area.".into());
             }
         }
+        // Ordering is presentation metadata only. Keep only existing notes that
+        // belong directly to the stored folder, and discard duplicates.
+        value.orders.retain(|parent, paths| {
+            if !self.resolve(parent).is_ok_and(|p| p.is_dir()) {
+                return false;
+            }
+            let mut seen = BTreeSet::new();
+            paths.retain(|path| {
+                path
+                    .strip_prefix(&format!("{parent}/"))
+                    .is_some_and(|tail| !tail.contains('/'))
+                    && self.resolve(path).is_ok_and(|p| p.is_file())
+                    && seen.insert(path.clone())
+            });
+            !paths.is_empty()
+        });
         value.revision += 1;
         atomic(&self.metadata_path("organizer.json")?, &value)?;
         Ok(value)
@@ -181,12 +201,51 @@ impl Workspace {
         self.read(path)
     }
     pub(crate) fn move_locks(&self, old: &str, next: &str) -> Result<()> {
+        let mut organizer = self.organizer()?;
+        let mut changed = false;
+        let ordered_note = organizer.orders.values().any(|paths| paths.iter().any(|path| path == old));
         if !old.contains('/') && !next.contains('/') {
-            let mut organizer = self.organizer()?;
             if let Some(area) = organizer.assignments.remove(old) {
                 organizer.assignments.insert(next.into(), area);
-                self.save_organizer(organizer)?;
+                changed = true;
             }
+        }
+        let mut orders = std::collections::BTreeMap::new();
+        for (parent, paths) in organizer.orders {
+            let mapped_parent = if parent == old || parent.starts_with(&format!("{old}/")) {
+                changed = true;
+                format!("{next}{}", &parent[old.len()..])
+            } else {
+                parent
+            };
+            let mapped_paths = paths
+                .into_iter()
+                .map(|path| {
+                    if path == old || path.starts_with(&format!("{old}/")) {
+                        changed = true;
+                        format!("{next}{}", &path[old.len()..])
+                    } else {
+                        path
+                    }
+                })
+                .collect();
+            orders.insert(mapped_parent, mapped_paths);
+        }
+        organizer.orders = orders;
+        let old_parent = old.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+        let next_parent = next.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+        if ordered_note && old_parent != next_parent && old.ends_with(".md") {
+            if let Some(paths) = organizer.orders.get_mut(old_parent) {
+                paths.retain(|path| path != next);
+                if paths.is_empty() {
+                    organizer.orders.remove(old_parent);
+                }
+            }
+            organizer.orders.entry(next_parent.into()).or_default().push(next.into());
+            changed = true;
+        }
+        if changed {
+            self.save_organizer(organizer)?;
         }
         let locks = self
             .locks()?
@@ -205,6 +264,21 @@ impl Workspace {
         let source = self.resolve(relative)?;
         if !source.exists() {
             return Err("This item no longer exists.".into());
+        }
+        // Remove deleted paths from manual presentation order immediately. A
+        // restored or imported note is then treated as a newly discovered note
+        // and appears alphabetically after the saved ordered notes.
+        let mut organizer = self.organizer()?;
+        let previous_orders = organizer.orders.clone();
+        organizer.orders.retain(|parent, paths| {
+            if parent == relative || parent.starts_with(&format!("{relative}/")) {
+                return false;
+            }
+            paths.retain(|path| path != relative && !path.starts_with(&format!("{relative}/")));
+            !paths.is_empty()
+        });
+        if organizer.orders != previous_orders {
+            self.save_organizer(organizer)?;
         }
         let root = self.internal_dir(".notus-trash")?;
         let directory = tempfile::Builder::new()
@@ -437,6 +511,29 @@ mod tests {
             "work"
         );
         assert_eq!(fs::read(w.root.join("Renamed/F/N.md")).unwrap(), before);
+    }
+    #[test]
+    fn manual_note_order_survives_moves_and_prunes_deleted_notes() {
+        let t = tempfile::tempdir().unwrap();
+        let w = Workspace::new(t.path().into()).unwrap();
+        w.create("", "vault", "V").unwrap();
+        w.create("V", "folder", "F").unwrap();
+        w.create("V", "folder", "G").unwrap();
+        let a = w.create("V/F", "note", "A").unwrap();
+        let b = w.create("V/F", "note", "B").unwrap();
+        let mut state = w.organizer().unwrap();
+        state.orders.insert("V/F".into(), vec![b.clone(), a.clone()]);
+        w.save_organizer(state).unwrap();
+        let snapshot = w.snapshot().unwrap();
+        let names: Vec<_> = snapshot.entries[0].children[0]
+            .children.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(names, ["B.md", "A.md"]);
+        let moved = w.relocate(&b, "V/G", "B.md").unwrap();
+        let state = w.organizer().unwrap();
+        assert_eq!(state.orders.get("V/F").unwrap(), &vec![a.clone()]);
+        assert_eq!(state.orders.get("V/G").unwrap(), &vec![moved.clone()]);
+        w.remove(&moved).unwrap();
+        assert!(!w.organizer().unwrap().orders.contains_key("V/G"));
     }
     #[test]
     fn trash_restore_collision_and_purge() {

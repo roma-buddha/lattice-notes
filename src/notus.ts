@@ -12,6 +12,7 @@ export type OrganizerState = {
   revision: number;
   areas: Area[];
   assignments: Record<string, string>;
+  orders: Record<string, string[]>;
 };
 export type Document = {
   path: string;
@@ -71,6 +72,9 @@ export const api = {
   detach: (path: string, atCursor: boolean) =>
     invoke<string>("detach_note", { path, atCursor }),
   focusMain: (path: string) => invoke<boolean>("focus_main", { path }),
+  registerTabStrip: (bounds: { x: number; y: number; width: number; height: number }) =>
+    invoke<void>("register_tab_strip", { bounds }),
+  tabDropTarget: () => invoke<{ label: string; client_x: number } | null>("tab_drop_target"),
 };
 export type Conversion = {
   source: string;

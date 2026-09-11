@@ -364,6 +364,23 @@ kbd {
   outline-offset: -1px;
   background: var(--soft);
 }
+.tree-row.drop-insert-before,
+.tree-row.drop-insert-after {
+  position: relative;
+}
+.tree-row.drop-insert-before::before,
+.tree-row.drop-insert-after::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  z-index: 2;
+}
+.tree-row.drop-insert-before::before { top: -1px; }
+.tree-row.drop-insert-after::after { bottom: -1px; }
 .tree-select {
   min-width: 0;
   flex: 1;
@@ -507,6 +524,23 @@ kbd {
   background: var(--paper);
   color: var(--ink);
 }
+.note-tab.tab-insert-before,
+.note-tab.tab-insert-after {
+  position: relative;
+}
+.note-tab.tab-insert-before::before,
+.note-tab.tab-insert-after::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  z-index: 3;
+}
+.note-tab.tab-insert-before::before { left: -2px; }
+.note-tab.tab-insert-after::after { right: -2px; }
 .note-tab [role="tab"] {
   min-width: 0;
   flex: 1;

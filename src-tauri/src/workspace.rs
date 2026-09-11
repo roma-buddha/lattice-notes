@@ -147,7 +147,7 @@ impl Workspace {
         }
         Ok(path)
     }
-    fn walk(&self, relative: &str) -> Result<Vec<Entry>> {
+    fn walk(&self, relative: &str, orders: &std::collections::BTreeMap<String, Vec<String>>) -> Result<Vec<Entry>> {
         let mut entries = Vec::new();
         for child in fs::read_dir(self.resolve(relative)?).map_err(err)? {
             let child = child.map_err(err)?;
@@ -178,7 +178,7 @@ impl Workspace {
                         "folder"
                     }
                     .into(),
-                    children: self.walk(&path)?,
+                    children: self.walk(&path, orders)?,
                 });
             } else if !relative.is_empty() && is_note(&child.path()) {
                 entries.push(Entry {
@@ -190,21 +190,29 @@ impl Workspace {
                 });
             }
         }
+        let ranks = orders.get(relative).map(|paths| {
+            paths.iter().enumerate().map(|(index, path)| (path.as_str(), index)).collect::<std::collections::HashMap<_, _>>()
+        });
         entries.sort_by(|a, b| {
             (a.kind == "note")
                 .cmp(&(b.kind == "note"))
-                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                .then_with(|| match (&ranks, a.kind.as_str(), b.kind.as_str()) {
+                    (Some(ranks), "note", "note") => ranks.get(a.path.as_str()).cmp(&ranks.get(b.path.as_str()))
+                        .then(a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+                    _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                })
         });
         Ok(entries)
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
+        let organizer = self.organizer()?;
         Ok(Snapshot {
             root: self
                 .root
                 .to_string_lossy()
                 .trim_start_matches("\\\\?\\")
                 .into(),
-            entries: self.walk("")?,
+            entries: self.walk("", &organizer.orders)?,
             legacy_root: self.home.as_ref().map(|p| {
                 p.to_string_lossy()
                     .trim_start_matches("\\\\?\\")
