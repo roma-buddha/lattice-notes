@@ -546,6 +546,11 @@ kbd {
   height: 100%;
   gap: 3px;
 }
+.tab-drag-space {
+  flex: 1 0 40px;
+  min-width: 40px;
+  align-self: stretch;
+}
 .note-tab {
   display: flex;
   flex: 0 1 190px;

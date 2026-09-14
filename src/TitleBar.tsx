@@ -592,6 +592,9 @@ export function TitleBar({
             )}
           </div>
         ))}
+        {/* The strip owns the visible empty title-bar space. Keep that space a
+            native drag region without marking the interactive tab controls. */}
+        <div className="tab-drag-space" data-tauri-drag-region />
       </div>
       <div className="title-drag-space" data-tauri-drag-region />
       <div className="window-controls">

@@ -2,6 +2,15 @@
 
 This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
+## 1.0.2 — 2026-09-14 — Titlebar drag surface
+
+- Restored native window dragging from the unused portion of the tab bar. The visible empty tab-strip area is now a dedicated Windows drag region, while note tabs themselves remain independently clickable and reorderable.
+- Updated the public repository identity to **Lotus Notes** (`lotus-notes` on GitHub) and removed the obsolete Ohana-inspired wording from its README description.
+
+**Compatibility:** no vault, note, draft, browser-profile, organizer, or AI-connection migration is required. Existing Lotus workspaces remain compatible.
+
+**Verification:** TypeScript production build, frontend lint, and 35 frontend tests passed before packaging.
+
 ## 1.0.1 — 2026-09-14 — Native browser and drop reliability
 
 - Removed the white flicker while resizing a split that contains a browser. An established native WebView2 browser now resizes in place; it is hidden only during its initial placement.
