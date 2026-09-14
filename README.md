@@ -2,6 +2,32 @@
 
 A Windows Markdown app with a quiet, Ohana-inspired interface. Opens directly into your notes. No Lotus account, server, local AI runtime, database, or starter content. Optional AI connects directly to your chosen provider using your own API key.
 
+## Install Lotus 1.0.0
+
+Lotus is a Windows-first, local-first Markdown knowledge workspace. Your notes stay as ordinary UTF-8 Markdown files in a folder you choose. It includes vault and folder organization, editable notes, tabs and split views, a contained browser tab, portable import/export, and optional bring-your-own-key AI providers.
+
+### Windows installer (recommended)
+
+1. Download `Lotus_1.0.0_x64-setup.exe` from the [Lotus 1.0.0 release](https://github.com/roma-buddha/lattice-notes/releases/tag/v1.0.0).
+2. Run the installer and follow the Windows prompts.
+3. Launch **Lotus** from the Start menu. On first launch, choose the parent folder where Lotus should keep its workspace.
+
+Windows WebView2 is required. It is preinstalled on current Windows 10 and 11 systems; install the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) if Lotus reports that it is missing.
+
+### Terminal installation / build from source
+
+Use this when you want to build Lotus yourself. Install Node.js, Rust with the MSVC toolchain, Visual Studio C++ Build Tools, and Windows WebView2 first.
+
+```powershell
+git clone https://github.com/roma-buddha/lattice-notes.git lotus
+cd lotus
+npm ci
+npm run package:win
+Start-Process .\src-tauri\target\release\bundle\nsis\Lotus_1.0.0_x64-setup.exe
+```
+
+For development rather than installation, run `npm run dev` after `npm ci`.
+
 ## AI assistant (0.13)
 
 ### Additional providers (0.13.1)
