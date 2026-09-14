@@ -1,7 +1,6 @@
 //! Remote AI has no filesystem tools. Credentials never enter workspace backups.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{Emitter, Manager};
 use std::{
     collections::HashMap,
     fs,
@@ -11,6 +10,7 @@ use std::{
     sync::{Mutex, OnceLock},
     time::Duration,
 };
+use tauri::{Emitter, Manager};
 
 #[derive(Serialize, Deserialize)]
 struct Secret {
@@ -32,9 +32,17 @@ pub struct Connection {
     source: String,
 }
 #[derive(Serialize)]
-pub struct HfModel { pub id: String, pub downloads: u64, pub likes: u64, pub size: Option<u64> }
+pub struct HfModel {
+    pub id: String,
+    pub downloads: u64,
+    pub likes: u64,
+    pub size: Option<u64>,
+}
 #[derive(Serialize)]
-pub struct HfFile { pub path: String, pub size: u64 }
+pub struct HfFile {
+    pub path: String,
+    pub size: u64,
+}
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct ComputerSpecs {
     pub system: String,
@@ -47,7 +55,10 @@ pub struct ComputerSpecs {
     pub drive_free_bytes: u64,
 }
 #[derive(Serialize, Deserialize, Default, Clone)]
-pub struct GpuSpecs { pub name: String, pub vram_bytes: u64 }
+pub struct GpuSpecs {
+    pub name: String,
+    pub vram_bytes: u64,
+}
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct ModelLibrary {
     pub default_root: String,
@@ -63,7 +74,11 @@ pub struct LibraryFile {
     pub modified: u64,
 }
 #[derive(Serialize, Clone)]
-pub struct DownloadProgress { pub stage: String, pub received: u64, pub total: Option<u64> }
+pub struct DownloadProgress {
+    pub stage: String,
+    pub received: u64,
+    pub total: Option<u64>,
+}
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Message {
     role: String,
@@ -82,8 +97,12 @@ static LOCAL_RUNTIME: OnceLock<Mutex<Option<std::process::Child>>> = OnceLock::n
 fn requests() -> &'static Requests {
     REQUESTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
-fn downloads() -> &'static Downloads { DOWNLOADS.get_or_init(|| Mutex::new(HashMap::new())) }
-fn local_runtime() -> &'static Mutex<Option<std::process::Child>> { LOCAL_RUNTIME.get_or_init(|| Mutex::new(None)) }
+fn downloads() -> &'static Downloads {
+    DOWNLOADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn local_runtime() -> &'static Mutex<Option<std::process::Child>> {
+    LOCAL_RUNTIME.get_or_init(|| Mutex::new(None))
+}
 fn base(provider: &str) -> Result<&'static str, String> {
     match provider {
         "openrouter" => Ok("https://openrouter.ai/api/v1"),
@@ -100,9 +119,13 @@ fn entry(provider: &str) -> Result<keyring::Entry, String> {
         .map_err(|_| "Windows credential storage is unavailable.".into())
 }
 fn endpoint(provider: &str, custom: &str) -> Result<String, String> {
-    if provider == "lotus" { return Ok("http://127.0.0.1:8081/v1".into()); }
+    if provider == "lotus" {
+        return Ok("http://127.0.0.1:8081/v1".into());
+    }
     if provider != "custom" {
-        if provider == "local" { return local_endpoint(custom); }
+        if provider == "local" {
+            return local_endpoint(custom);
+        }
         return Ok(base(provider)?.into());
     }
     let raw = custom.trim().trim_end_matches('/');
@@ -134,13 +157,26 @@ fn local_endpoint(raw: &str) -> Result<String, String> {
     let url = reqwest::Url::parse(raw).map_err(|_| "Enter a valid local API base URL.")?;
     let host = url.host_str().unwrap_or("").to_ascii_lowercase();
     let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
-    if !loopback || !["http", "https"].contains(&url.scheme()) || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() || raw.len() > 512 || url.path().ends_with("/chat/completions") || url.path().ends_with("/models") {
-        return Err("Use a localhost HTTP(S) API base URL, such as http://127.0.0.1:1234/v1.".into());
+    if !loopback
+        || !["http", "https"].contains(&url.scheme())
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || raw.len() > 512
+        || url.path().ends_with("/chat/completions")
+        || url.path().ends_with("/models")
+    {
+        return Err(
+            "Use a localhost HTTP(S) API base URL, such as http://127.0.0.1:1234/v1.".into(),
+        );
     }
     Ok(url.to_string().trim_end_matches('/').into())
 }
 fn connection_key(provider: &str, key: &str, destination: &str) -> Result<String, String> {
-    if provider == "lotus" || (provider == "local" && key.trim().is_empty()) { return Ok(String::new()); }
+    if provider == "lotus" || (provider == "local" && key.trim().is_empty()) {
+        return Ok(String::new());
+    }
     let value = key.trim();
     if !value.is_empty() {
         if value.len() > 1024 || value.chars().any(char::is_control) {
@@ -196,11 +232,14 @@ async fn response(mut response: reqwest::Response) -> Result<Value, String> {
 }
 async fn models(provider: &str, key: &str, destination: &str) -> Result<Vec<String>, String> {
     let request = client()?.get(format!("{destination}/models"));
-    let request = if key.is_empty() { request } else { request.bearer_auth(key) };
-    let data = response(request.send()
-            .await
-            .map_err(|_| "Cannot reach the provider. Check the server address and that it is running.")?,
-    )
+    let request = if key.is_empty() {
+        request
+    } else {
+        request.bearer_auth(key)
+    };
+    let data = response(request.send().await.map_err(|_| {
+        "Cannot reach the provider. Check the server address and that it is running."
+    })?)
     .await?;
     let mut ids: Vec<String> = data["data"]
         .as_array()
@@ -241,7 +280,12 @@ pub fn ai_connections() -> Result<Vec<Connection>, String> {
                     model: value.model,
                     name: value.name,
                     base_url: endpoint(provider, &value.base_url)?,
-                    source: if ["local", "lotus"].contains(&provider) { "local" } else { "api" }.into(),
+                    source: if ["local", "lotus"].contains(&provider) {
+                        "local"
+                    } else {
+                        "api"
+                    }
+                    .into(),
                 });
             }
             Err(keyring::Error::NoEntry) => {}
@@ -255,26 +299,65 @@ pub fn ai_connections() -> Result<Vec<Connection>, String> {
 pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String, String> {
     let (file, _) = approved_file(&app, &path)?;
     {
-        let mut guard = local_runtime().lock().map_err(|_| "Cannot start the Lotus runtime.")?;
+        let mut guard = local_runtime()
+            .lock()
+            .map_err(|_| "Cannot start the Lotus runtime.")?;
         if let Some(child) = guard.as_mut() {
-            if child.try_wait().map_err(|_| "Cannot inspect the Lotus runtime.")?.is_none() {
-                return Err("A Lotus local model is already running. Stop it before loading another model.".into());
+            if child
+                .try_wait()
+                .map_err(|_| "Cannot inspect the Lotus runtime.")?
+                .is_none()
+            {
+                return Err(
+                    "A Lotus local model is already running. Stop it before loading another model."
+                        .into(),
+                );
             }
         }
-        let executable = app.path().resource_dir().map_err(|_| "Lotus local runtime is unavailable.")?.join("resources").join("llama").join("llama-server.exe");
-        if !executable.is_file() { return Err("Lotus local runtime is unavailable. Reinstall Lotus and try again.".into()); }
+        let executable = app
+            .path()
+            .resource_dir()
+            .map_err(|_| "Lotus local runtime is unavailable.")?
+            .join("resources")
+            .join("llama")
+            .join("llama-server.exe");
+        if !executable.is_file() {
+            return Err(
+                "Lotus local runtime is unavailable. Reinstall Lotus and try again.".into(),
+            );
+        }
         // Keep context useful for note work without spending too much of the
         // currently available RAM on the local runtime.
         let available = ai_computer_specs(app.clone(), None)
             .map(|specs| specs.available_ram_bytes)
             .unwrap_or(0);
-        let context = if available >= 8 * 1024 * 1024 * 1024 { "8192" }
-            else if available >= 4 * 1024 * 1024 * 1024 { "4096" }
-            else { "2048" };
+        let context = if available >= 8 * 1024 * 1024 * 1024 {
+            "8192"
+        } else if available >= 4 * 1024 * 1024 * 1024 {
+            "4096"
+        } else {
+            "2048"
+        };
         let mut command = Command::new(&executable);
-        command.args(["--model", &file.to_string_lossy(), "--host", "127.0.0.1", "--port", "8081", "--ctx-size", context, "--n-gpu-layers", "0"]);
-        #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
-        let child = command.spawn()
+        command.args([
+            "--model",
+            &file.to_string_lossy(),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8081",
+            "--ctx-size",
+            context,
+            "--n-gpu-layers",
+            "0",
+        ]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let child = command
+            .spawn()
             .map_err(|_| "Lotus could not start its local runtime.")?;
         *guard = Some(child);
     }
@@ -284,9 +367,27 @@ pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String,
             // llama-server reports the model by its full path, not by the GGUF
             // filename. Saving the filename made every later chat request ask
             // for a non-existent model and fail despite a healthy server.
-            let model = models.into_iter().next().ok_or("The Lotus runtime did not report a model.")?;
-            let display = file.file_stem().and_then(|value| value.to_str()).unwrap_or("Local GGUF").to_string();
-            entry("lotus")?.set_password(&serde_json::to_string(&Secret { key: String::new(), model, name: format!("Lotus local runtime · {display}"), base_url: destination, runtime_path: file.to_string_lossy().to_string() }).map_err(|_| "Cannot save local runtime connection.")?).map_err(|_| "Could not save the local runtime connection.")?;
+            let model = models
+                .into_iter()
+                .next()
+                .ok_or("The Lotus runtime did not report a model.")?;
+            let display = file
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Local GGUF")
+                .to_string();
+            entry("lotus")?
+                .set_password(
+                    &serde_json::to_string(&Secret {
+                        key: String::new(),
+                        model,
+                        name: format!("Lotus local runtime · {display}"),
+                        base_url: destination,
+                        runtime_path: file.to_string_lossy().to_string(),
+                    })
+                    .map_err(|_| "Cannot save local runtime connection.")?,
+                )
+                .map_err(|_| "Could not save the local runtime connection.")?;
             return Ok(display);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -300,10 +401,15 @@ fn saved_lotus_model_file(app: &tauri::AppHandle, saved: &Secret) -> Result<Stri
         }
     }
     // Migrate releases that stored only the GGUF filename as the model ID.
-    let wanted = Path::new(&saved.model).file_stem().and_then(|value| value.to_str())
-        .unwrap_or(&saved.model).to_ascii_lowercase();
+    let wanted = Path::new(&saved.model)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(&saved.model)
+        .to_ascii_lowercase();
     let mut files = Vec::new();
-    for root in approved_roots(app)? { collect_library(&root, &root, &mut files)?; }
+    for root in approved_roots(app)? {
+        collect_library(&root, &root, &mut files)?;
+    }
     files.into_iter().find(|file| {
         Path::new(&file.name).file_stem().and_then(|value| value.to_str())
             .is_some_and(|stem| stem.eq_ignore_ascii_case(&wanted))
@@ -311,13 +417,21 @@ fn saved_lotus_model_file(app: &tauri::AppHandle, saved: &Secret) -> Result<Stri
 }
 async fn ensure_lotus_runtime(app: tauri::AppHandle, saved: &Secret) -> Result<(), String> {
     let destination = endpoint("lotus", "")?;
-    if models("lotus", "", &destination).await.is_ok() { return Ok(()); }
+    if models("lotus", "", &destination).await.is_ok() {
+        return Ok(());
+    }
     let file = saved_lotus_model_file(&app, saved)?;
     ai_run_lotus(app, file).await.map(|_| ())
 }
 #[tauri::command]
 pub fn ai_stop_lotus() -> Result<(), String> {
-    if let Some(mut child) = local_runtime().lock().map_err(|_| "Cannot stop the Lotus runtime.")?.take() { let _ = child.kill(); }
+    if let Some(mut child) = local_runtime()
+        .lock()
+        .map_err(|_| "Cannot stop the Lotus runtime.")?
+        .take()
+    {
+        let _ = child.kill();
+    }
     let _ = entry("lotus")?.delete_credential();
     Ok(())
 }
@@ -326,95 +440,215 @@ fn valid_hf_repository(value: &str) -> bool {
     matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(model), None) if !owner.is_empty() && !model.is_empty() && value.len() <= 180 && value.chars().all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c)) && !value.contains(".."))
 }
 fn valid_hf_file(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 300 && value.ends_with(".gguf") && !value.contains("..") && value.chars().all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
+    !value.is_empty()
+        && value.len() <= 300
+        && value.ends_with(".gguf")
+        && !value.contains("..")
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
 }
 fn library_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let root = app.path().app_config_dir().map_err(|_| "Cannot locate Lotus settings.")?.join("models");
+    let root = app
+        .path()
+        .app_config_dir()
+        .map_err(|_| "Cannot locate Lotus settings.")?
+        .join("models");
     fs::create_dir_all(&root).map_err(|_| "Cannot create Lotus model settings.")?;
     Ok(root.join("library.json"))
 }
 fn load_library(app: &tauri::AppHandle) -> Result<ModelLibrary, String> {
     let path = library_path(app)?;
-    if !path.exists() { return Ok(ModelLibrary::default()); }
-    serde_json::from_slice(&fs::read(path).map_err(|_| "Cannot read model library settings.")?).map_err(|_| "Model library settings are invalid.".into())
+    if !path.exists() {
+        return Ok(ModelLibrary::default());
+    }
+    serde_json::from_slice(&fs::read(path).map_err(|_| "Cannot read model library settings.")?)
+        .map_err(|_| "Model library settings are invalid.".into())
 }
 fn save_library(app: &tauri::AppHandle, value: &ModelLibrary) -> Result<ModelLibrary, String> {
     let path = library_path(app)?;
     let parent = path.parent().ok_or("Invalid model settings path.")?;
-    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|_| "Cannot save model library settings.")?;
-    file.write_all(&serde_json::to_vec(value).map_err(|_| "Cannot save model library settings.")?).map_err(|_| "Cannot save model library settings.")?;
-    file.persist(&path).map_err(|_| "Cannot save model library settings.")?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|_| "Cannot save model library settings.")?;
+    file.write_all(&serde_json::to_vec(value).map_err(|_| "Cannot save model library settings.")?)
+        .map_err(|_| "Cannot save model library settings.")?;
+    file.persist(&path)
+        .map_err(|_| "Cannot save model library settings.")?;
     Ok(value.clone())
 }
 fn ordinary_root(value: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(value);
-    let meta = fs::symlink_metadata(&path).map_err(|_| "The selected model folder no longer exists.")?;
-    if meta.file_type().is_symlink() || !meta.is_dir() { return Err("Choose an ordinary local folder for models.".into()); }
-    path.canonicalize().map_err(|_| "Cannot access the selected model folder.".into())
+    let meta =
+        fs::symlink_metadata(&path).map_err(|_| "The selected model folder no longer exists.")?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err("Choose an ordinary local folder for models.".into());
+    }
+    path.canonicalize()
+        .map_err(|_| "Cannot access the selected model folder.".into())
 }
 fn approved_roots(app: &tauri::AppHandle) -> Result<Vec<PathBuf>, String> {
-    load_library(app)?.roots.iter().map(|root| ordinary_root(root)).collect()
+    load_library(app)?
+        .roots
+        .iter()
+        .map(|root| ordinary_root(root))
+        .collect()
 }
 fn approved_file(app: &tauri::AppHandle, value: &str) -> Result<(PathBuf, PathBuf), String> {
     let path = PathBuf::from(value);
     let meta = fs::symlink_metadata(&path).map_err(|_| "The model file no longer exists.")?;
-    if meta.file_type().is_symlink() || !meta.is_file() || !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("gguf")) { return Err("Choose an ordinary GGUF file in an approved model folder.".into()); }
-    let file = path.canonicalize().map_err(|_| String::from("Cannot access this model file."))?;
-    let root = approved_roots(app)?.into_iter().find(|root| file.starts_with(root)).ok_or("Lotus can manage files only in approved model folders.")?;
+    if meta.file_type().is_symlink()
+        || !meta.is_file()
+        || !path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("gguf"))
+    {
+        return Err("Choose an ordinary GGUF file in an approved model folder.".into());
+    }
+    let file = path
+        .canonicalize()
+        .map_err(|_| String::from("Cannot access this model file."))?;
+    let root = approved_roots(app)?
+        .into_iter()
+        .find(|root| file.starts_with(root))
+        .ok_or("Lotus can manage files only in approved model folders.")?;
     Ok((file, root))
 }
 fn safe_gguf_name(value: &str) -> Result<&str, String> {
     let name = value.trim();
-    if name.is_empty() || name.len() > 240 || name.contains(['/', '\\']) || name.contains("..") || !name.to_ascii_lowercase().ends_with(".gguf") { return Err("Use a simple .gguf filename.".into()); }
+    if name.is_empty()
+        || name.len() > 240
+        || name.contains(['/', '\\'])
+        || name.contains("..")
+        || !name.to_ascii_lowercase().ends_with(".gguf")
+    {
+        return Err("Use a simple .gguf filename.".into());
+    }
     Ok(name)
 }
-fn modified(meta: &fs::Metadata) -> u64 { meta.modified().ok().and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok()).map(|value| value.as_secs()).unwrap_or(0) }
-fn collect_library(root: &Path, directory: &Path, output: &mut Vec<LibraryFile>) -> Result<(), String> {
+fn modified(meta: &fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_secs())
+        .unwrap_or(0)
+}
+fn collect_library(
+    root: &Path,
+    directory: &Path,
+    output: &mut Vec<LibraryFile>,
+) -> Result<(), String> {
     for item in fs::read_dir(directory).map_err(|_| "Cannot scan this model folder.")? {
         let item = item.map_err(|_| "Cannot scan this model folder.")?;
         let path = item.path();
         let meta = fs::symlink_metadata(&path).map_err(|_| "Cannot scan this model folder.")?;
-        if meta.file_type().is_symlink() { continue; }
-        if meta.is_dir() { collect_library(root, &path, output)?; continue; }
-        if !meta.is_file() || !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("gguf")) { continue; }
-        let relative = path.strip_prefix(root).map_err(|_| "Cannot scan this model folder.")?;
-        output.push(LibraryFile { name: path.file_name().and_then(|value| value.to_str()).unwrap_or("model.gguf").into(), path: path.to_string_lossy().into(), relative_path: relative.to_string_lossy().into(), root: root.to_string_lossy().into(), size: meta.len(), modified: modified(&meta) });
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            collect_library(root, &path, output)?;
+            continue;
+        }
+        if !meta.is_file()
+            || !path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("gguf"))
+        {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| "Cannot scan this model folder.")?;
+        output.push(LibraryFile {
+            name: path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("model.gguf")
+                .into(),
+            path: path.to_string_lossy().into(),
+            relative_path: relative.to_string_lossy().into(),
+            root: root.to_string_lossy().into(),
+            size: meta.len(),
+            modified: modified(&meta),
+        });
     }
     Ok(())
 }
 #[tauri::command]
-pub fn model_library(app: tauri::AppHandle) -> Result<ModelLibrary, String> { load_library(&app) }
+pub fn model_library(app: tauri::AppHandle) -> Result<ModelLibrary, String> {
+    load_library(&app)
+}
 #[tauri::command]
-pub async fn model_library_choose_root(app: tauri::AppHandle) -> Result<Option<ModelLibrary>, String> {
-    let Some(folder) = rfd::AsyncFileDialog::new().set_title("Choose your Lotus models folder").pick_folder().await else { return Ok(None); };
-    let root = ordinary_root(&folder.path().to_string_lossy())?.to_string_lossy().to_string();
+pub async fn model_library_choose_root(
+    app: tauri::AppHandle,
+) -> Result<Option<ModelLibrary>, String> {
+    let Some(folder) = rfd::AsyncFileDialog::new()
+        .set_title("Choose your Lotus models folder")
+        .pick_folder()
+        .await
+    else {
+        return Ok(None);
+    };
+    let root = ordinary_root(&folder.path().to_string_lossy())?
+        .to_string_lossy()
+        .to_string();
     let mut library = load_library(&app)?;
-    if !library.roots.contains(&root) { library.roots.push(root.clone()); }
+    if !library.roots.contains(&root) {
+        library.roots.push(root.clone());
+    }
     library.default_root = root;
     Ok(Some(save_library(&app, &library)?))
 }
 #[tauri::command]
 pub async fn model_library_add_root(app: tauri::AppHandle) -> Result<Option<ModelLibrary>, String> {
-    let Some(folder) = rfd::AsyncFileDialog::new().set_title("Add a model folder").pick_folder().await else { return Ok(None); };
-    let root = ordinary_root(&folder.path().to_string_lossy())?.to_string_lossy().to_string();
+    let Some(folder) = rfd::AsyncFileDialog::new()
+        .set_title("Add a model folder")
+        .pick_folder()
+        .await
+    else {
+        return Ok(None);
+    };
+    let root = ordinary_root(&folder.path().to_string_lossy())?
+        .to_string_lossy()
+        .to_string();
     let mut library = load_library(&app)?;
-    if !library.roots.contains(&root) { library.roots.push(root.clone()); }
-    if library.default_root.is_empty() { library.default_root = root; }
+    if !library.roots.contains(&root) {
+        library.roots.push(root.clone());
+    }
+    if library.default_root.is_empty() {
+        library.default_root = root;
+    }
     Ok(Some(save_library(&app, &library)?))
 }
 #[tauri::command]
 pub fn model_library_files(app: tauri::AppHandle) -> Result<Vec<LibraryFile>, String> {
     let mut output = Vec::new();
-    for root in approved_roots(&app)? { collect_library(&root, &root, &mut output)?; }
-    output.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+    for root in approved_roots(&app)? {
+        collect_library(&root, &root, &mut output)?;
+    }
+    output.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+    });
     Ok(output)
 }
 #[tauri::command]
-pub fn ai_computer_specs(app: tauri::AppHandle, refresh: Option<bool>) -> Result<ComputerSpecs, String> {
-    let cache = app.path().app_config_dir().map_err(|_| "Cannot locate Lotus settings.")?.join("computer-specs.json");
-    if !refresh.unwrap_or(false) { if let Ok(bytes) = fs::read(&cache) {
-        if let Ok(saved) = serde_json::from_slice::<ComputerSpecs>(&bytes) { return Ok(saved); }
-    } }
+pub fn ai_computer_specs(
+    app: tauri::AppHandle,
+    refresh: Option<bool>,
+) -> Result<ComputerSpecs, String> {
+    let cache = app
+        .path()
+        .app_config_dir()
+        .map_err(|_| "Cannot locate Lotus settings.")?
+        .join("computer-specs.json");
+    if !refresh.unwrap_or(false) {
+        if let Ok(bytes) = fs::read(&cache) {
+            if let Ok(saved) = serde_json::from_slice::<ComputerSpecs>(&bytes) {
+                return Ok(saved);
+            }
+        }
+    }
     // CIM is Windows' supported local inventory API. It reads only this machine
     // and its output is never placed in vaults or sent to a model provider.
     let script = "$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1; $os=Get-CimInstance Win32_OperatingSystem; $gpu=@(Get-CimInstance Win32_VideoController|ForEach-Object {[pscustomobject]@{name=$_.Name;vram=[uint64]$_.AdapterRAM}}); $drive=Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID=\"C:\"'; [pscustomobject]@{system=$os.Caption;cpu=$cpu.Name;cores=[uint32]$cpu.NumberOfLogicalProcessors;ram_bytes=[uint64]$os.TotalVisibleMemorySize*1024;available_ram_bytes=[uint64]$os.FreePhysicalMemory*1024;drive_bytes=[uint64]$drive.Size;drive_free_bytes=[uint64]$drive.FreeSpace;gpus=$gpu}|ConvertTo-Json -Compress -Depth 3";
@@ -422,68 +656,212 @@ pub fn ai_computer_specs(app: tauri::AppHandle, refresh: Option<bool>) -> Result
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
         .map_err(|_| "Windows hardware information is unavailable.")?;
-    if !output.status.success() { return Err("Windows hardware information is unavailable.".into()); }
+    if !output.status.success() {
+        return Err("Windows hardware information is unavailable.".into());
+    }
     #[derive(Deserialize)]
-    struct RawGpu { #[serde(default)] name: String, #[serde(default)] vram: u64 }
+    struct RawGpu {
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        vram: u64,
+    }
     #[derive(Deserialize)]
-    struct RawSpecs { #[serde(default)] system: String, #[serde(default)] cpu: String, #[serde(default)] cores: u32, #[serde(default)] ram_bytes: u64, #[serde(default)] available_ram_bytes: u64, #[serde(default)] drive_bytes: u64, #[serde(default)] drive_free_bytes: u64, #[serde(default)] gpus: Vec<RawGpu> }
-    let raw: RawSpecs = serde_json::from_slice(&output.stdout).map_err(|_| "Windows returned incomplete hardware information.")?;
-    let specs = ComputerSpecs { system: raw.system, cpu: raw.cpu, cores: raw.cores, ram_bytes: raw.ram_bytes, available_ram_bytes: raw.available_ram_bytes, drive_bytes: raw.drive_bytes, drive_free_bytes: raw.drive_free_bytes, gpus: raw.gpus.into_iter().map(|gpu| GpuSpecs { name: gpu.name, vram_bytes: gpu.vram }).collect() };
-    if let Some(parent) = cache.parent() { let _ = fs::create_dir_all(parent); }
+    struct RawSpecs {
+        #[serde(default)]
+        system: String,
+        #[serde(default)]
+        cpu: String,
+        #[serde(default)]
+        cores: u32,
+        #[serde(default)]
+        ram_bytes: u64,
+        #[serde(default)]
+        available_ram_bytes: u64,
+        #[serde(default)]
+        drive_bytes: u64,
+        #[serde(default)]
+        drive_free_bytes: u64,
+        #[serde(default)]
+        gpus: Vec<RawGpu>,
+    }
+    let raw: RawSpecs = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "Windows returned incomplete hardware information.")?;
+    let specs = ComputerSpecs {
+        system: raw.system,
+        cpu: raw.cpu,
+        cores: raw.cores,
+        ram_bytes: raw.ram_bytes,
+        available_ram_bytes: raw.available_ram_bytes,
+        drive_bytes: raw.drive_bytes,
+        drive_free_bytes: raw.drive_free_bytes,
+        gpus: raw
+            .gpus
+            .into_iter()
+            .map(|gpu| GpuSpecs {
+                name: gpu.name,
+                vram_bytes: gpu.vram,
+            })
+            .collect(),
+    };
+    if let Some(parent) = cache.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     let _ = fs::write(cache, serde_json::to_vec(&specs).unwrap_or_default());
     Ok(specs)
 }
 #[tauri::command]
 pub fn model_library_reveal(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let (path, _) = approved_file(&app, &path)?;
-    std::process::Command::new("explorer.exe").arg("/select,").arg(path.to_string_lossy().trim_start_matches("\\\\?\\")).spawn().map_err(|_| "Cannot open File Explorer.")?;
+    std::process::Command::new("explorer.exe")
+        .arg("/select,")
+        .arg(path.to_string_lossy().trim_start_matches("\\\\?\\"))
+        .spawn()
+        .map_err(|_| "Cannot open File Explorer.")?;
     Ok(())
 }
 #[tauri::command]
-pub fn model_library_rename(app: tauri::AppHandle, path: String, name: String) -> Result<LibraryFile, String> {
+pub fn model_library_rename(
+    app: tauri::AppHandle,
+    path: String,
+    name: String,
+) -> Result<LibraryFile, String> {
     let (source, root) = approved_file(&app, &path)?;
-    let destination = source.parent().ok_or("Invalid model path.")?.join(safe_gguf_name(&name)?);
-    if destination.exists() { return Err("A model with that name already exists in this folder.".into()); }
+    let destination = source
+        .parent()
+        .ok_or("Invalid model path.")?
+        .join(safe_gguf_name(&name)?);
+    if destination.exists() {
+        return Err("A model with that name already exists in this folder.".into());
+    }
     fs::rename(&source, &destination).map_err(|_| "Cannot rename this model.")?;
     let meta = fs::metadata(&destination).map_err(|_| "Cannot read the renamed model.")?;
-    Ok(LibraryFile { name: destination.file_name().and_then(|value| value.to_str()).unwrap_or("model.gguf").into(), path: destination.to_string_lossy().into(), relative_path: destination.strip_prefix(&root).map_err(|_| "Invalid model path.")?.to_string_lossy().into(), root: root.to_string_lossy().into(), size: meta.len(), modified: modified(&meta) })
+    Ok(LibraryFile {
+        name: destination
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("model.gguf")
+            .into(),
+        path: destination.to_string_lossy().into(),
+        relative_path: destination
+            .strip_prefix(&root)
+            .map_err(|_| "Invalid model path.")?
+            .to_string_lossy()
+            .into(),
+        root: root.to_string_lossy().into(),
+        size: meta.len(),
+        modified: modified(&meta),
+    })
 }
 #[tauri::command]
-pub fn model_library_move(app: tauri::AppHandle, path: String, target_root: String) -> Result<LibraryFile, String> {
+pub fn model_library_move(
+    app: tauri::AppHandle,
+    path: String,
+    target_root: String,
+) -> Result<LibraryFile, String> {
     let (source, _) = approved_file(&app, &path)?;
     let target = ordinary_root(&target_root)?;
-    if !approved_roots(&app)?.iter().any(|root| root == &target) { return Err("Choose an approved model folder.".into()); }
+    if !approved_roots(&app)?.iter().any(|root| root == &target) {
+        return Err("Choose an approved model folder.".into());
+    }
     let destination = target.join(source.file_name().ok_or("Invalid model path.")?);
-    if destination.exists() { return Err("A model with that name already exists in the destination folder.".into()); }
+    if destination.exists() {
+        return Err("A model with that name already exists in the destination folder.".into());
+    }
     fs::rename(&source, &destination).map_err(|_| "Cannot move this model.")?;
     let meta = fs::metadata(&destination).map_err(|_| "Cannot read the moved model.")?;
-    Ok(LibraryFile { name: destination.file_name().and_then(|value| value.to_str()).unwrap_or("model.gguf").into(), path: destination.to_string_lossy().into(), relative_path: destination.strip_prefix(&target).map_err(|_| "Invalid model path.")?.to_string_lossy().into(), root: target.to_string_lossy().into(), size: meta.len(), modified: modified(&meta) })
+    Ok(LibraryFile {
+        name: destination
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("model.gguf")
+            .into(),
+        path: destination.to_string_lossy().into(),
+        relative_path: destination
+            .strip_prefix(&target)
+            .map_err(|_| "Invalid model path.")?
+            .to_string_lossy()
+            .into(),
+        root: target.to_string_lossy().into(),
+        size: meta.len(),
+        modified: modified(&meta),
+    })
 }
 #[tauri::command]
-pub fn model_library_delete(app: tauri::AppHandle, path: String) -> Result<(), String> { let (path, _) = approved_file(&app, &path)?; fs::remove_file(path).map_err(|_| String::from("Cannot delete this model.")) }
+pub fn model_library_delete(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let (path, _) = approved_file(&app, &path)?;
+    fs::remove_file(path).map_err(|_| String::from("Cannot delete this model."))
+}
 #[tauri::command]
 pub async fn hf_search(query: String) -> Result<Vec<HfModel>, String> {
-    let mut url = reqwest::Url::parse("https://huggingface.co/api/models").map_err(|_| "Could not prepare Hugging Face search.")?;
+    let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
+        .map_err(|_| "Could not prepare Hugging Face search.")?;
     {
         let mut query_pairs = url.query_pairs_mut();
-        if !query.trim().is_empty() { query_pairs.append_pair("search", query.trim()); }
+        if !query.trim().is_empty() {
+            query_pairs.append_pair("search", query.trim());
+        }
         // An empty search is a useful public-GGUF browse view, rather than a no-op.
         // The public catalogue is intentionally broad. The UI keeps it in its
         // own scroll pane so browsing does not inflate the note workspace.
-        query_pairs.append_pair("filter", "gguf").append_pair("sort", "downloads").append_pair("direction", "-1").append_pair("limit", "250");
+        query_pairs
+            .append_pair("filter", "gguf")
+            .append_pair("sort", "downloads")
+            .append_pair("direction", "-1")
+            .append_pair("limit", "250");
     }
-    let data = response(client()?.get(url).send().await.map_err(|_| "Cannot reach Hugging Face. Check your internet connection.")?).await?;
-    let mut results: Vec<HfModel> = data.as_array().ok_or("Hugging Face did not return model results.")?.iter().filter_map(|item| Some(HfModel { id: item["id"].as_str()?.to_string(), downloads: item["downloads"].as_u64().unwrap_or(0), likes: item["likes"].as_u64().unwrap_or(0), size: item["safetensors"]["total"].as_u64() })).filter(|item| valid_hf_repository(&item.id)).collect();
+    let data = response(
+        client()?
+            .get(url)
+            .send()
+            .await
+            .map_err(|_| "Cannot reach Hugging Face. Check your internet connection.")?,
+    )
+    .await?;
+    let mut results: Vec<HfModel> = data
+        .as_array()
+        .ok_or("Hugging Face did not return model results.")?
+        .iter()
+        .filter_map(|item| {
+            Some(HfModel {
+                id: item["id"].as_str()?.to_string(),
+                downloads: item["downloads"].as_u64().unwrap_or(0),
+                likes: item["likes"].as_u64().unwrap_or(0),
+                size: item["safetensors"]["total"].as_u64(),
+            })
+        })
+        .filter(|item| valid_hf_repository(&item.id))
+        .collect();
     results.truncate(250);
     Ok(results)
 }
 #[tauri::command]
 pub async fn hf_files(repository: String) -> Result<Vec<HfFile>, String> {
-    if !valid_hf_repository(&repository) { return Err("Choose a public Hugging Face repository.".into()); }
+    if !valid_hf_repository(&repository) {
+        return Err("Choose a public Hugging Face repository.".into());
+    }
     let url = format!("https://huggingface.co/api/models/{repository}/tree/main?recursive=false");
-    let data = response(client()?.get(url).send().await.map_err(|_| "Cannot reach Hugging Face.")?).await?;
-    let mut files: Vec<HfFile> = data.as_array().ok_or("Hugging Face did not return repository files.")?.iter().filter_map(|item| { let path = item["path"].as_str()?.to_string(); valid_hf_file(&path).then(|| HfFile { path, size: item["size"].as_u64().unwrap_or(0) }) }).collect();
-    files.sort_by(|a,b| a.size.cmp(&b.size));
+    let data = response(
+        client()?
+            .get(url)
+            .send()
+            .await
+            .map_err(|_| "Cannot reach Hugging Face.")?,
+    )
+    .await?;
+    let mut files: Vec<HfFile> = data
+        .as_array()
+        .ok_or("Hugging Face did not return repository files.")?
+        .iter()
+        .filter_map(|item| {
+            let path = item["path"].as_str()?.to_string();
+            valid_hf_file(&path).then(|| HfFile {
+                path,
+                size: item["size"].as_u64().unwrap_or(0),
+            })
+        })
+        .collect();
+    files.sort_by_key(|file| file.size);
     Ok(files)
 }
 #[tauri::command]
@@ -494,22 +872,54 @@ pub async fn hf_download(
     file: String,
     destination_name: String,
 ) -> Result<(), String> {
-    if !valid_hf_repository(&repository) || !valid_hf_file(&file) { return Err("Choose a public GGUF file from Hugging Face.".into()); }
+    if !valid_hf_repository(&repository) || !valid_hf_file(&file) {
+        return Err("Choose a public GGUF file from Hugging Face.".into());
+    }
     let destination_name = safe_gguf_name(&destination_name)?.to_string();
     let library = load_library(&app)?;
-    if library.default_root.is_empty() { return Err("Choose a default model folder in Local models before downloading.".into()); }
+    if library.default_root.is_empty() {
+        return Err("Choose a default model folder in Local models before downloading.".into());
+    }
     let root = ordinary_root(&library.default_root)?;
-    if !approved_roots(&app)?.iter().any(|item| item == &root) { return Err("Choose an approved default model folder.".into()); }
+    if !approved_roots(&app)?.iter().any(|item| item == &root) {
+        return Err("Choose an approved default model folder.".into());
+    }
     let destination = root.join(destination_name);
-    if destination.exists() { return Err("A model with that filename already exists in your default model folder.".into()); }
+    if destination.exists() {
+        return Err(
+            "A model with that filename already exists in your default model folder.".into(),
+        );
+    }
     let listed = hf_files(repository.clone()).await?;
-    let item = listed.iter().find(|item| item.path == file).ok_or("That GGUF file is no longer available.")?;
-    let available = fs2::available_space(&root).map_err(|_| "Cannot check model-folder disk space.")?;
-    if item.size > 0 && available < item.size.saturating_add(512 * 1024 * 1024) { return Err("Not enough free disk space. Free space for the model plus 512 MB, then try again.".into()); }
+    let item = listed
+        .iter()
+        .find(|item| item.path == file)
+        .ok_or("That GGUF file is no longer available.")?;
+    let available =
+        fs2::available_space(&root).map_err(|_| "Cannot check model-folder disk space.")?;
+    if item.size > 0 && available < item.size.saturating_add(512 * 1024 * 1024) {
+        return Err(
+            "Not enough free disk space. Free space for the model plus 512 MB, then try again."
+                .into(),
+        );
+    }
     let id = window.label().to_string();
     let (sender, mut cancelled) = tokio::sync::watch::channel(false);
-    downloads().lock().map_err(|_| "Could not start download.")?.insert(id.clone(), sender);
-    let emit = |stage: &str, received: u64, total: Option<u64>| { let _ = app.emit_to(&id, "lotus-hf-download", DownloadProgress { stage: stage.into(), received, total }); };
+    downloads()
+        .lock()
+        .map_err(|_| "Could not start download.")?
+        .insert(id.clone(), sender);
+    let emit = |stage: &str, received: u64, total: Option<u64>| {
+        let _ = app.emit_to(
+            &id,
+            "lotus-hf-download",
+            DownloadProgress {
+                stage: stage.into(),
+                received,
+                total,
+            },
+        );
+    };
     let result = async {
         emit("Downloading", 0, Some(item.size));
         let url = format!("https://huggingface.co/{repository}/resolve/main/{file}?download=true");
@@ -534,13 +944,21 @@ pub async fn hf_download(
         emit("Downloaded", received, total);
         Ok(())
     }.await;
-    if result.is_err() { let _ = fs::remove_file(destination.with_extension("gguf.part")); }
-    if let Ok(mut active) = downloads().lock() { active.remove(&id); }
+    if result.is_err() {
+        let _ = fs::remove_file(destination.with_extension("gguf.part"));
+    }
+    if let Ok(mut active) = downloads().lock() {
+        active.remove(&id);
+    }
     result
 }
 #[tauri::command]
 pub fn hf_cancel(window: tauri::WebviewWindow) {
-    if let Ok(active) = downloads().lock() { if let Some(sender) = active.get(window.label()) { let _ = sender.send(true); } }
+    if let Ok(active) = downloads().lock() {
+        if let Some(sender) = active.get(window.label()) {
+            let _ = sender.send(true);
+        }
+    }
 }
 #[tauri::command]
 pub async fn ai_models(
@@ -562,7 +980,12 @@ pub async fn ai_save(
 ) -> Result<(), String> {
     let destination = endpoint(&provider, base_url.as_deref().unwrap_or(""))?;
     let key = connection_key(&provider, &key, &destination)?;
-    let model = if provider == "google" { model.trim().trim_start_matches("models/") } else { model.trim() }.to_string();
+    let model = if provider == "google" {
+        model.trim().trim_start_matches("models/")
+    } else {
+        model.trim()
+    }
+    .to_string();
     let name = name.unwrap_or_default().trim().to_string();
     if model.is_empty()
         || model.len() > 200
@@ -627,10 +1050,11 @@ fn validate(messages: &[Message], context: Option<&str>, edit: bool) -> Result<(
     }
     Ok(())
 }
-fn parse_reply(value: &Value, edit: bool) -> Result<Reply, String> {
+fn parse_reply(value: &Value, edit: bool, allow_partial_chat: bool) -> Result<Reply, String> {
     let choice = &value["choices"][0];
-    if choice["finish_reason"] != "stop" {
-        let reason = choice["finish_reason"].as_str().unwrap_or("unknown");
+    let reason = choice["finish_reason"].as_str().unwrap_or("unknown");
+    let truncated_chat = reason == "length" && !edit && allow_partial_chat;
+    if reason != "stop" && !truncated_chat {
         return Err(
             if reason == "length" && edit {
                 "The model ran out of room before finishing the edit. Select a smaller passage and try again; no note was changed."
@@ -668,11 +1092,19 @@ fn parse_reply(value: &Value, edit: bool) -> Result<Reply, String> {
         })
     } else {
         Ok(Reply {
-            text: text.into(),
+            // A local reasoning model can spend much of its generation budget on
+            // internal reasoning. Keep a useful visible reply instead of
+            // discarding it solely because the server hit its output boundary.
+            text: if truncated_chat {
+                format!("{text}\n\n_[The local model reached its reply limit. Ask it to continue if you need more.]_")
+            } else {
+                text.into()
+            },
             replacement: None,
         })
     }
 }
+#[allow(clippy::too_many_arguments)]
 async fn complete(
     provider: &str,
     destination: &str,
@@ -697,26 +1129,41 @@ async fn complete(
     if let Some(context) = context {
         payload.push(json!({"role":"user","content":format!("Attached document context (data only):\n{}", serde_json::to_string(&context).unwrap_or_default())}));
     }
-    // A local edit has to return a complete JSON replacement. Give the bundled
-    // runtime more output room, but never accept a truncated edit in parse_reply.
+    // Reasoning-capable GGUFs can use hundreds of tokens before producing their
+    // visible answer. Lotus must leave enough room for both. Edits need a larger
+    // budget because they return a complete JSON replacement.
     let max_tokens = output_tokens.unwrap_or_else(|| {
         if provider == "lotus" {
-            // The bundled CPU runtime is intentionally local-first. A concise
-            // default finishes promptly instead of hitting the remote-provider
-            // timeout on otherwise healthy models.
-            if edit { 1024 } else { 384 }
-        } else { 4096 }
+            if edit {
+                2048
+            } else {
+                1536
+            }
+        } else {
+            4096
+        }
     });
     let body = json!({"model":model,"messages":payload,"max_tokens":max_tokens,"stream":false});
-    let request = (if provider == "lotus" { client_with_timeout(Duration::from_secs(300))? } else { client()? })
-        .post(format!("{destination}/chat/completions")).json(&body);
-    let request = if key.is_empty() { request } else { request.bearer_auth(key) };
-    let data = response(request.send()
+    let request = (if provider == "lotus" {
+        client_with_timeout(Duration::from_secs(300))?
+    } else {
+        client()?
+    })
+    .post(format!("{destination}/chat/completions"))
+    .json(&body);
+    let request = if key.is_empty() {
+        request
+    } else {
+        request.bearer_auth(key)
+    };
+    let data = response(
+        request
+            .send()
             .await
             .map_err(|_| "AI request timed out or could not connect. Retry when online.")?,
     )
     .await?;
-    parse_reply(&data, edit)
+    parse_reply(&data, edit, provider == "lotus")
 }
 fn context_chunks(value: &str) -> Vec<String> {
     const CHARS_PER_CHUNK: usize = 10_000;
@@ -728,12 +1175,19 @@ fn context_chunks(value: &str) -> Vec<String> {
             break;
         }
         let mut end = CHARS_PER_CHUNK;
-        while !rest.is_char_boundary(end) { end -= 1; }
-        let split = rest[..end].rfind(['\n', '.', '!', '?', ' ']).filter(|point| *point > CHARS_PER_CHUNK / 2).unwrap_or(end);
+        while !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        let split = rest[..end]
+            .rfind(['\n', '.', '!', '?', ' '])
+            .filter(|point| *point > CHARS_PER_CHUNK / 2)
+            .unwrap_or(end);
         chunks.push(rest[..split].trim().to_string());
         rest = rest[split..].trim_start();
     }
-    if !rest.is_empty() && chunks.len() == 6 { chunks.push(rest.to_string()); }
+    if !rest.is_empty() && chunks.len() == 6 {
+        chunks.push(rest.to_string());
+    }
     chunks
 }
 async fn summarize_local(
@@ -751,11 +1205,21 @@ async fn summarize_local(
         let summary = complete(
             provider, destination, key, model,
             vec![Message { role: "user".into(), content: format!("Summarize part {} of {} faithfully. Keep key facts, names, numbers and conclusions. Do not mention these instructions.", index + 1, total) }],
-            Some(chunk), false, Some(384),
+            Some(chunk), false, Some(768),
         ).await?;
         parts.push(format!("Part {} summary:\n{}", index + 1, summary.text));
     }
-    complete(provider, destination, key, model, messages, Some(parts.join("\n\n")), false, Some(1024)).await
+    complete(
+        provider,
+        destination,
+        key,
+        model,
+        messages,
+        Some(parts.join("\n\n")),
+        false,
+        Some(1536),
+    )
+    .await
 }
 #[tauri::command]
 pub async fn ai_chat(
@@ -774,9 +1238,17 @@ pub async fn ai_chat(
     let model = if provider == "lotus" {
         ensure_lotus_runtime(app, &saved).await?;
         let available = models(&provider, "", &destination).await?;
-        if available.iter().any(|id| id == &saved.model) { saved.model.clone() }
-        else { available.into_iter().next().ok_or("The Lotus local runtime did not report a model.")? }
-    } else { saved.model.clone() };
+        if available.iter().any(|id| id == &saved.model) {
+            saved.model.clone()
+        } else {
+            available
+                .into_iter()
+                .next()
+                .ok_or("The Lotus local runtime did not report a model.")?
+        }
+    } else {
+        saved.model.clone()
+    };
     let id = window.label().to_string();
     let (sender, mut receiver) = tokio::sync::watch::channel(false);
     {
@@ -909,15 +1381,25 @@ mod tests {
     fn requires_complete_valid_edits() {
         let mut value = json!({"choices":[{"finish_reason":"stop","message":{"content":"{\"replacement\":\"**Hi**\"}"}}]});
         assert_eq!(
-            parse_reply(&value, true).unwrap().replacement.unwrap(),
+            parse_reply(&value, true, true)
+                .unwrap()
+                .replacement
+                .unwrap(),
             "**Hi**"
         );
         value["choices"][0]["finish_reason"] = json!("length");
-        assert!(parse_reply(&value, true).is_err());
+        assert!(parse_reply(&value, true, true).is_err());
         value["choices"][0]["finish_reason"] = json!("stop");
         value["choices"][0]["message"]["content"] = json!("Here is an edit");
-        assert!(parse_reply(&value, true).is_err());
-        }
+        assert!(parse_reply(&value, true, true).is_err());
+    }
+    #[test]
+    fn preserves_a_truncated_local_chat_reply() {
+        let value = json!({"choices":[{"finish_reason":"length","message":{"content":"A useful partial reply."}}]});
+        let reply = parse_reply(&value, false, true).unwrap();
+        assert!(reply.text.starts_with("A useful partial reply."));
+        assert!(reply.text.contains("reached its reply limit"));
+        assert!(parse_reply(&value, false, false).is_err());
     }
     #[test]
     fn local_endpoints_and_hugging_face_names_are_strictly_limited() {
@@ -925,7 +1407,11 @@ mod tests {
             local_endpoint("http://127.0.0.1:1234/v1").unwrap(),
             "http://127.0.0.1:1234/v1"
         );
-        for invalid in ["http://example.com/v1", "ftp://localhost/v1", "http://127.0.0.1/v1/models"] {
+        for invalid in [
+            "http://example.com/v1",
+            "ftp://localhost/v1",
+            "http://127.0.0.1/v1/models",
+        ] {
             assert!(local_endpoint(invalid).is_err(), "{invalid}");
         }
         assert!(valid_hf_repository("TheBloke/Example-GGUF"));
@@ -933,3 +1419,4 @@ mod tests {
         assert!(valid_hf_file("model.Q4_K_M.gguf"));
         assert!(!valid_hf_file("model.bin"));
     }
+}

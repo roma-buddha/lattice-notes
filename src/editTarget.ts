@@ -6,7 +6,12 @@ export type EditTarget = {
   text: string;
   from: number;
   to: number;
-  replace: (from: number, to: number, text: string) => void;
+  replace: (
+    from: number,
+    to: number,
+    text: string,
+    selection?: { anchor: number; head: number },
+  ) => void;
   selectAll: () => void;
 };
 export function readTarget(element: HTMLElement): EditTarget {
@@ -35,10 +40,10 @@ export function codeTarget(view: EditorView): EditTarget {
     text: view.state.doc.toString(),
     from,
     to,
-    replace: (start, end, text) => {
+    replace: (start, end, text, selection) => {
       view.dispatch({
         changes: { from: start, to: end, insert: text },
-        selection: { anchor: start, head: start + text.length },
+        selection: selection ?? { anchor: start, head: start + text.length },
         userEvent: "input.format",
         annotations: isolateHistory.of("full"),
       });
@@ -70,11 +75,14 @@ export function inputTarget(input: HTMLTextAreaElement): EditTarget {
     text: input.value,
     from: input.selectionStart,
     to: input.selectionEnd,
-    replace: (from, to, text) => {
+    replace: (from, to, text, selection) => {
       input.value = input.value.slice(0, from) + text + input.value.slice(to);
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.focus();
-      input.setSelectionRange(from, from + text.length);
+      input.setSelectionRange(
+        selection?.anchor ?? from,
+        selection?.head ?? from + text.length,
+      );
     },
     selectAll: () => {
       input.focus();
@@ -280,7 +288,18 @@ export function lineTarget(
         ),
     )
     .join("\n");
-  target.replace(from, to, text);
+  const firstPrefix = typeof prefix === "function" ? prefix(0) : prefix;
+  const firstBody = target.text
+    .slice(from, to)
+    .split("\n")[0]
+    .replace(/^(?:#{1,6}\s+|[-*+]\s+(?:\[[ x]\]\s+)?|\d+\.\s+|>\s*)/, "");
+  const anchor = from + firstPrefix.length;
+  target.replace(from, to, text, {
+    anchor,
+    // Preserve the list marker while keeping an existing first item ready to
+    // replace. An empty line becomes a normal caret after the marker.
+    head: anchor + firstBody.length,
+  });
 }
 
 export function blockTarget(

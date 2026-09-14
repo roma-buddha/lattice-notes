@@ -173,9 +173,20 @@ export function AppSettings({
             <section className="about-lotus">
               <h3>About Lotus</h3>
               <p>Lotus is a local-first workspace for Markdown notes. Your notes remain in the folders you choose on this computer.</p>
+              <h4>Project</h4>
+              <p>Lotus is an educational project by VISTU LAB.</p>
+              <h4>License</h4>
+              <p>© 2026 Lattice Notes contributors. Lotus is licensed under the MIT License.</p>
+              <p className="muted">You may use, copy, modify, publish, distribute, sublicense, and sell copies of Lotus, provided its copyright and MIT license notice are retained. It is provided without warranty. See the bundled LICENSE file for the complete terms.</p>
               <h4>Release</h4>
               <p>Lotus {release.version}</p>
-              <button type="button" onClick={() => void openReleaseHistory()}>View complete release history</button>
+              <button
+                type="button"
+                className="release-history-link"
+                onClick={() => void openReleaseHistory()}
+              >
+                View complete release history
+              </button>
               <h4>Privacy</h4>
               <p>Lotus does not run its own cloud for your notes or store their contents elsewhere. It reads and writes only the local vault you open.</p>
               <h4>AI models</h4>

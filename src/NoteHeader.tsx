@@ -25,6 +25,7 @@ export function NoteHeader({
   undo,
   canUndo,
   drop,
+  dropTarget,
   rename,
   close,
   ai,
@@ -38,6 +39,7 @@ export function NoteHeader({
   undo: () => void;
   canUndo: boolean;
   drop: (path: string) => void;
+  dropTarget: "primary-pane" | "secondary-pane";
   rename: (name: string) => Promise<void>;
   close?: () => void;
   ai: () => void;
@@ -86,10 +88,11 @@ export function NoteHeader({
     <>
       <header
         className={`note-heading ${over ? "pane-drop-target" : ""}`}
+        data-lotus-drop={dropTarget}
         onDragOver={(e) => {
           if (
             e.dataTransfer.types.some((t) =>
-              ["notus-note", "application/notus-tab"].includes(t),
+              ["notus-note", "application/notus-tab", "application/x-lotus-note"].includes(t),
             )
           ) {
             e.preventDefault();
@@ -112,7 +115,11 @@ export function NoteHeader({
               JSON.parse(e.dataTransfer.getData("application/notus-tab"))
                 .path || path;
           } catch {
-            /* Sidebar transfer. */
+            try {
+              path = JSON.parse(e.dataTransfer.getData("application/x-lotus-note")).path || path;
+            } catch {
+              /* Empty or unsupported transfer. */
+            }
           }
           if (path) drop(path);
         }}

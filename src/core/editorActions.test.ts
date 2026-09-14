@@ -110,6 +110,23 @@ describe("selection-safe formatting", () => {
     lineTarget(u.value, (i) => String(i + 1) + ". ");
     expect(u.result()).toBe("1. first\n2. second");
   });
+  it("keeps list markers when replacing the newly formatted item", () => {
+    let result = "draft";
+    let selection: { anchor: number; head: number } | undefined;
+    const value: EditTarget = {
+      text: result,
+      from: 0,
+      to: result.length,
+      replace: (from, to, insert, nextSelection) => {
+        result = result.slice(0, from) + insert + result.slice(to);
+        selection = nextSelection;
+      },
+      selectAll: () => {},
+    };
+    lineTarget(value, "- ");
+    expect(result).toBe("- draft");
+    expect(selection).toEqual({ anchor: 2, head: 7 });
+  });
   it("every editable format, paragraph and insertion leaf transforms text or launches its dialog", () => {
     const edits = ["Format", "Paragraph", "Insert"];
     let dialogs = 0;

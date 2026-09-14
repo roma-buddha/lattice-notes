@@ -10,13 +10,15 @@ import {
   Square,
   Copy,
   Columns2,
+  Globe2,
   Settings,
   X,
 } from "lucide-react";
 import { api, stem } from "./notus";
 import logo from "../icon.svg";
-export type TabTransfer = { path: string; source?: string; id?: number; targetX?: number };
-export type NoteTab = { id: number; path: string | null; organizer?: boolean; release?: boolean };
+import type { BrowserSession } from "./browserSession";
+export type TabTransfer = { path?: string; source?: string; id?: number; targetX?: number };
+export type NoteTab = { id: number; path: string | null; pinned?: boolean; organizer?: boolean; release?: boolean; browser?: BrowserSession };
 export function TitleBar({
   sidebar,
   toggleSidebar,
@@ -32,6 +34,7 @@ export function TitleBar({
   split,
   tabContext,
   settings,
+  browser,
   compact = false,
 }: {
   sidebar: boolean;
@@ -48,6 +51,7 @@ export function TitleBar({
   split: (button: HTMLElement) => void;
   tabContext: (id: number, event: React.MouseEvent) => void;
   settings: () => void;
+  browser: () => void;
   compact?: boolean;
 }) {
   const [maximized, setMaximized] = useState(false);
@@ -71,8 +75,8 @@ export function TitleBar({
   }, [active, tabs]);
   useEffect(() => {
     const receivePointerDrop = (event: Event) => {
-      const detail = (event as CustomEvent<{ path?: unknown }>).detail;
-      if (typeof detail?.path !== "string" || !detail.path) return;
+      const detail = (event as CustomEvent<{ path?: unknown; target?: unknown }>).detail;
+      if (detail?.target !== "tabs" || typeof detail.path !== "string" || !detail.path) return;
       // This is deliberately separate from HTML DnD.  It is the dependable
       // same-window route when WebView2 declines to surface DataTransfer data.
       dropTab({ path: detail.path });
@@ -186,10 +190,19 @@ export function TitleBar({
         >
           <Settings size={17} />
         </button>}
+        {!compact && <button
+          className="icon"
+          aria-label="Open browser tab"
+          title="Open browser"
+          onClick={browser}
+        >
+          <Globe2 size={17} />
+        </button>}
       </div>
       <div
         className={`tab-strip ${dragOver ? "tab-drop-target" : ""}`}
         ref={strip}
+        data-tauri-drag-region
         data-lotus-drop="tabs"
         onWheel={(event) => {
           if (strip.current)
@@ -217,16 +230,17 @@ export function TitleBar({
       >
         {tabs.map((tab) => (
           <div
-            className={`note-tab ${tab.id === active ? "active" : ""} ${insert?.id === tab.id ? (insert.before ? "tab-insert-before" : "tab-insert-after") : ""}`}
+            className={`note-tab ${tab.pinned ? "pinned-tab" : ""} ${tab.id === active ? "active" : ""} ${insert?.id === tab.id ? (insert.before ? "tab-insert-before" : "tab-insert-after") : ""}`}
             key={tab.id}
             data-tab-id={tab.id}
+            data-pinned={tab.pinned || undefined}
             onContextMenu={(e) => {
               e.preventDefault();
-              tabContext(tab.id, e);
+              if (!tab.pinned) tabContext(tab.id, e);
             }}
             draggable={false}
             onPointerDown={(event) => {
-              if (!tab.path || event.button !== 0 || (event.target as HTMLElement).closest(".tab-close")) return;
+              if (tab.pinned || (!tab.path && !tab.browser) || event.button !== 0 || (event.target as HTMLElement).closest(".tab-close")) return;
               pointerTab.current = { id: tab.id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false };
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
@@ -240,6 +254,7 @@ export function TitleBar({
               }
               const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-tab-id]");
               if (!target) return;
+              if (target?.dataset.pinned) return;
               const targetId = Number(target.dataset.tabId);
               if (!Number.isFinite(targetId) || targetId === drag.id) return;
               const rect = target.getBoundingClientRect();
@@ -251,13 +266,25 @@ export function TitleBar({
               pointerTab.current = null;
               if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
               if (!drag.active) return;
-              const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-tab-id]");
+              const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-tab-id], [data-lotus-drop]");
+              if (target?.dataset.lotusDrop === "primary-pane" || target?.dataset.lotusDrop === "secondary-pane") {
+                window.dispatchEvent(new CustomEvent(tab.browser ? "lotus-browser-pointer-drop" : "lotus-note-pointer-drop", {
+                  detail: tab.browser ? { browserId: tab.browser.id, target: target.dataset.lotusDrop } : { path: tab.path, target: target.dataset.lotusDrop },
+                }));
+                setInsert(null);
+                window.setTimeout(() => { suppressTabClick.current = false; }, 0);
+                return;
+              }
+              if (target?.dataset.pinned) {
+                setInsert(null);
+                return;
+              }
               const targetId = Number(target?.dataset.tabId);
               if (Number.isFinite(targetId) && targetId !== drag.id) {
                 const rect = target!.getBoundingClientRect();
                 const index = tabs.findIndex((candidate) => candidate.id === targetId);
                 const before = event.clientX < rect.left + rect.width / 2 ? targetId : tabs[index + 1]?.id;
-                dropTab({ id: drag.id, path: tab.path!, source: getCurrentWindow().label }, before);
+                dropTab({ id: drag.id, path: tab.path ?? undefined, source: getCurrentWindow().label }, before);
               }
               setInsert(null);
               window.setTimeout(() => { suppressTabClick.current = false; }, 0);
@@ -271,8 +298,10 @@ export function TitleBar({
               ) {
                 event.preventDefault();
                 event.stopPropagation();
-                const rect = event.currentTarget.getBoundingClientRect();
-                setInsert({ id: tab.id, before: event.clientX < rect.left + rect.width / 2 });
+                if (!tab.pinned) {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setInsert({ id: tab.id, before: event.clientX < rect.left + rect.width / 2 });
+                }
               }
             }}
             onDragLeave={(event) => {
@@ -299,7 +328,7 @@ export function TitleBar({
               finishTabDrag(tab.id);
             }}
             onDrop={(event) => {
-              const before = insert?.id === tab.id && !insert.before
+              const before = tab.pinned ? undefined : insert?.id === tab.id && !insert.before
                 ? tabs[tabs.findIndex((candidate) => candidate.id === tab.id) + 1]?.id
                 : tab.id;
               setInsert(null);
@@ -311,7 +340,7 @@ export function TitleBar({
               aria-selected={tab.id === active}
               aria-controls="editor-workspace"
               tabIndex={tab.id === active ? 0 : -1}
-              title={tab.path ?? "Organize workspace"}
+              title={tab.path ?? tab.browser?.url ?? (tab.pinned ? "Current note" : "Organize workspace")}
               onClick={(event) => {
                 if (suppressTabClick.current) { event.preventDefault(); return; }
                 selectTab(tab.id);
@@ -339,13 +368,13 @@ export function TitleBar({
                 }
               }}
             >
-              <FileText size={14} />
-              <span>{tab.path ? stem(tab.path) : tab.release ? "Release history" : "Organizer"}</span>
+              {tab.browser ? <Globe2 size={14} /> : <FileText size={14} />}
+              <span>{tab.path ? stem(tab.path) : tab.browser ? tab.browser.title : tab.pinned ? "Current note" : tab.release ? "Release history" : "Organizer"}</span>
             </button>
-            {
+            {!tab.pinned &&
               <button
                 className="tab-close"
-                aria-label={`Close tab ${tab.path ? stem(tab.path) : tab.release ? "Release history" : "Organizer"}`}
+                aria-label={`Close tab ${tab.path ? stem(tab.path) : tab.browser?.title ?? (tab.release ? "Release history" : "Organizer")}`}
                 onClick={() => closeTab(tab.id)}
               >
                 <X size={13} />

@@ -396,7 +396,8 @@ kbd {
 .tree-row.pointer-drop-before::before { top: -1px; }
 .tree-row.pointer-drop-after::after { bottom: -1px; }
 .tree-row.pointer-drop-target,
-.tab-strip.pointer-drop-target { outline: 1px solid var(--accent); background: var(--soft); }
+.tab-strip.pointer-drop-target,
+.note-heading.pointer-drop-target { outline: 1px solid var(--accent); background: var(--soft); }
 .tree-row.drop-insert-before::before { top: -1px; }
 .tree-row.drop-insert-after::after { bottom: -1px; }
 .tree-select {
@@ -521,6 +522,7 @@ kbd {
   flex-basis: 94px;
 }
 .tab-strip {
+  flex: 1 1 auto;
   display: flex;
   align-items: end;
   overflow-x: auto;
@@ -541,6 +543,9 @@ kbd {
 .note-tab.active {
   background: var(--paper);
   color: var(--ink);
+}
+.note-tab.pinned-tab {
+  border-left: 2px solid var(--accent);
 }
 .note-tab.tab-insert-before,
 .note-tab.tab-insert-after {
@@ -2842,6 +2847,33 @@ dialog form > label {
 .about-lotus h3 { margin-top:0; }
 .about-lotus h4 { margin:22px 0 4px; }
 .about-lotus p { margin:0 0 10px; }
+.about-lotus .release-history-link {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  width: fit-content;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #d97838;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.about-lotus .release-history-link:hover,
+.about-lotus .release-history-link:focus-visible {
+  color: #f09a57;
+  background: transparent;
+}
+.browser-pane { display:flex; min-height:0; flex:1; flex-direction:column; background:var(--surface); }
+.browser-toolbar { display:flex; flex:0 0 auto; align-items:center; gap:4px; padding:7px 12px; border-bottom:1px solid var(--line); background:var(--panel); }
+.browser-toolbar form { display:flex; flex:1; min-width:0; align-items:center; gap:7px; padding:4px 8px; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--muted); }
+.browser-toolbar input { min-width:0; flex:1; padding:0; border:0; outline:0; background:transparent; color:var(--text); font:inherit; font-size:13px; }
+.browser-surface { min-height:0; flex:1; background:var(--surface); }
 .library-file { display:flex; flex-direction:column; gap:5px; padding:10px; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
 .library-file > div { display:flex; gap:5px; margin-top:3px; }
 .library-file-title { display:flex !important; align-items:flex-start; gap:8px !important; margin:0 !important; }

@@ -192,12 +192,12 @@ export function SidebarTree(props: Props) {
                   setPointerDragging(drag.path);
                 }
                 const target = document.elementFromPoint(event.clientX, event.clientY)
-                  ?.closest<HTMLElement>("[data-path], [data-lotus-drop='tabs']");
+                  ?.closest<HTMLElement>("[data-path], [data-lotus-drop]");
                 document.querySelectorAll(".pointer-drop-before, .pointer-drop-after, .pointer-drop-target").forEach((element) =>
                   element.classList.remove("pointer-drop-before", "pointer-drop-after", "pointer-drop-target"),
                 );
                 if (!target || target.dataset.path === drag.path) return;
-                if (target.dataset.lotusDrop === "tabs") {
+                if (target.dataset.lotusDrop) {
                   target.classList.add("pointer-drop-target");
                 } else if (target.dataset.kind === "note") {
                   const rect = target.getBoundingClientRect();
@@ -218,9 +218,11 @@ export function SidebarTree(props: Props) {
                 setPointerDragging("");
                 if (!drag.active) return;
                 const target = document.elementFromPoint(event.clientX, event.clientY)
-                  ?.closest<HTMLElement>("[data-path], [data-lotus-drop='tabs']");
-                if (target?.dataset.lotusDrop === "tabs") {
-                  window.dispatchEvent(new CustomEvent("lotus-note-pointer-drop", { detail: { path: drag.path } }));
+                  ?.closest<HTMLElement>("[data-path], [data-lotus-drop]");
+                if (target?.dataset.lotusDrop) {
+                  window.dispatchEvent(new CustomEvent("lotus-note-pointer-drop", {
+                    detail: { path: drag.path, target: target.dataset.lotusDrop },
+                  }));
                 } else if (target?.dataset.kind === "note") {
                   const targetPath = target.dataset.path!;
                   const targetParent = target.dataset.parent ?? "";

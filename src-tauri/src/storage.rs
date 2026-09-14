@@ -126,8 +126,7 @@ impl Workspace {
             }
             let mut seen = BTreeSet::new();
             paths.retain(|path| {
-                path
-                    .strip_prefix(&format!("{parent}/"))
+                path.strip_prefix(&format!("{parent}/"))
                     .is_some_and(|tail| !tail.contains('/'))
                     && self.resolve(path).is_ok_and(|p| p.is_file())
                     && seen.insert(path.clone())
@@ -203,7 +202,10 @@ impl Workspace {
     pub(crate) fn move_locks(&self, old: &str, next: &str) -> Result<()> {
         let mut organizer = self.organizer()?;
         let mut changed = false;
-        let ordered_note = organizer.orders.values().any(|paths| paths.iter().any(|path| path == old));
+        let ordered_note = organizer
+            .orders
+            .values()
+            .any(|paths| paths.iter().any(|path| path == old));
         if !old.contains('/') && !next.contains('/') {
             if let Some(area) = organizer.assignments.remove(old) {
                 organizer.assignments.insert(next.into(), area);
@@ -233,7 +235,10 @@ impl Workspace {
         }
         organizer.orders = orders;
         let old_parent = old.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
-        let next_parent = next.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+        let next_parent = next
+            .rsplit_once('/')
+            .map(|(parent, _)| parent)
+            .unwrap_or("");
         if ordered_note && old_parent != next_parent && old.ends_with(".md") {
             if let Some(paths) = organizer.orders.get_mut(old_parent) {
                 paths.retain(|path| path != next);
@@ -241,7 +246,11 @@ impl Workspace {
                     organizer.orders.remove(old_parent);
                 }
             }
-            organizer.orders.entry(next_parent.into()).or_default().push(next.into());
+            organizer
+                .orders
+                .entry(next_parent.into())
+                .or_default()
+                .push(next.into());
             changed = true;
         }
         if changed {
@@ -373,7 +382,7 @@ impl Workspace {
             }
             items.push(item);
         }
-        items.sort_by(|a, b| b.deleted.cmp(&a.deleted));
+        items.sort_by_key(|item| std::cmp::Reverse(item.deleted));
         Ok(items)
     }
     pub fn restore(&self, id: &str) -> Result<String> {
@@ -522,11 +531,16 @@ mod tests {
         let a = w.create("V/F", "note", "A").unwrap();
         let b = w.create("V/F", "note", "B").unwrap();
         let mut state = w.organizer().unwrap();
-        state.orders.insert("V/F".into(), vec![b.clone(), a.clone()]);
+        state
+            .orders
+            .insert("V/F".into(), vec![b.clone(), a.clone()]);
         w.save_organizer(state).unwrap();
         let snapshot = w.snapshot().unwrap();
         let names: Vec<_> = snapshot.entries[0].children[0]
-            .children.iter().map(|entry| entry.name.as_str()).collect();
+            .children
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
         assert_eq!(names, ["B.md", "A.md"]);
         let moved = w.relocate(&b, "V/G", "B.md").unwrap();
         let state = w.organizer().unwrap();

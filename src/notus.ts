@@ -48,6 +48,7 @@ export const api = {
   saveOrganizer: (value: OrganizerState) =>
     invoke<OrganizerState>("save_organizer", { value }),
   snapshot: () => invoke<Snapshot>("snapshot"),
+  startupSnapshot: () => invoke<Snapshot>("startup_snapshot"),
   search: (query: string) => invoke<SearchResult[]>("search_notes", { query }),
   read: (path: string) => invoke<Document>("read_note", { path }),
   write: (path: string, content: string, revision: string) =>
@@ -76,6 +77,10 @@ export const api = {
     invoke<void>("register_tab_strip", { bounds }),
   tabDropTarget: () => invoke<{ label: string; client_x: number } | null>("tab_drop_target"),
   releaseHistory: () => invoke<string>("release_history"),
+  browserNavigate: (label: string, url: string) => invoke<string>("browser_navigate", { label, url }),
+  browserReload: (label: string) => invoke<void>("browser_reload", { label }),
+  browserHistory: (label: string, forward: boolean) => invoke<void>("browser_history", { label, forward }),
+  browserUrl: (label: string) => invoke<string>("browser_url_current", { label }),
 };
 export type Conversion = {
   source: string;

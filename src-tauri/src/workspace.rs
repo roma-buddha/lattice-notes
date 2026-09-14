@@ -147,7 +147,12 @@ impl Workspace {
         }
         Ok(path)
     }
-    fn walk(&self, relative: &str, orders: &std::collections::BTreeMap<String, Vec<String>>) -> Result<Vec<Entry>> {
+    fn walk(
+        &self,
+        relative: &str,
+        orders: &std::collections::BTreeMap<String, Vec<String>>,
+        include_identities: bool,
+    ) -> Result<Vec<Entry>> {
         let mut entries = Vec::new();
         for child in fs::read_dir(self.resolve(relative)?).map_err(err)? {
             let child = child.map_err(err)?;
@@ -164,12 +169,15 @@ impl Workspace {
             } else {
                 format!("{relative}/{name}")
             };
-            if self.resolve(&path).is_err() {
-                continue;
-            }
             if kind.is_dir() {
                 entries.push(Entry {
-                    identity: file_identity(&child.path()),
+                    // `read_dir` started from a validated workspace directory and
+                    // symlinks are rejected above, so resolving every child again
+                    // only repeats Windows canonicalisation work.  It is especially
+                    // costly for vaults with thousands of notes.
+                    identity: include_identities
+                        .then(|| file_identity(&child.path()))
+                        .flatten(),
                     name,
                     path: path.clone(),
                     kind: if relative.is_empty() {
@@ -178,11 +186,13 @@ impl Workspace {
                         "folder"
                     }
                     .into(),
-                    children: self.walk(&path, orders)?,
+                    children: self.walk(&path, orders, include_identities)?,
                 });
             } else if !relative.is_empty() && is_note(&child.path()) {
                 entries.push(Entry {
-                    identity: file_identity(&child.path()),
+                    identity: include_identities
+                        .then(|| file_identity(&child.path()))
+                        .flatten(),
                     name,
                     path,
                     kind: "note".into(),
@@ -191,16 +201,22 @@ impl Workspace {
             }
         }
         let ranks = orders.get(relative).map(|paths| {
-            paths.iter().enumerate().map(|(index, path)| (path.as_str(), index)).collect::<std::collections::HashMap<_, _>>()
+            paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| (path.as_str(), index))
+                .collect::<std::collections::HashMap<_, _>>()
         });
         entries.sort_by(|a, b| {
-            (a.kind == "note")
-                .cmp(&(b.kind == "note"))
-                .then_with(|| match (&ranks, a.kind.as_str(), b.kind.as_str()) {
-                    (Some(ranks), "note", "note") => ranks.get(a.path.as_str()).cmp(&ranks.get(b.path.as_str()))
+            (a.kind == "note").cmp(&(b.kind == "note")).then_with(|| {
+                match (&ranks, a.kind.as_str(), b.kind.as_str()) {
+                    (Some(ranks), "note", "note") => ranks
+                        .get(a.path.as_str())
+                        .cmp(&ranks.get(b.path.as_str()))
                         .then(a.name.to_lowercase().cmp(&b.name.to_lowercase())),
                     _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                })
+                }
+            })
         });
         Ok(entries)
     }
@@ -212,7 +228,29 @@ impl Workspace {
                 .to_string_lossy()
                 .trim_start_matches("\\\\?\\")
                 .into(),
-            entries: self.walk("", &organizer.orders)?,
+            entries: self.walk("", &organizer.orders, true)?,
+            legacy_root: self.home.as_ref().map(|p| {
+                p.to_string_lossy()
+                    .trim_start_matches("\\\\?\\")
+                    .to_string()
+            }),
+        })
+    }
+    /// A first-paint snapshot intentionally omits Windows file identities.
+    ///
+    /// Identity handles are needed to recognise external rename operations, but
+    /// opening every file just to obtain them delays startup dramatically in a
+    /// large vault.  The UI follows this with a normal snapshot in the
+    /// background, before filesystem-change reconciliation is needed.
+    pub fn startup_snapshot(&self) -> Result<Snapshot> {
+        let organizer = self.organizer()?;
+        Ok(Snapshot {
+            root: self
+                .root
+                .to_string_lossy()
+                .trim_start_matches("\\\\?\\")
+                .into(),
+            entries: self.walk("", &organizer.orders, false)?,
             legacy_root: self.home.as_ref().map(|p| {
                 p.to_string_lossy()
                     .trim_start_matches("\\\\?\\")
@@ -238,7 +276,11 @@ impl Workspace {
             if kind.is_symlink() {
                 continue;
             }
-            let path = if relative.is_empty() { name.clone() } else { format!("{relative}/{name}") };
+            let path = if relative.is_empty() {
+                name.clone()
+            } else {
+                format!("{relative}/{name}")
+            };
             if self.resolve(&path).is_err() {
                 continue;
             }
@@ -246,11 +288,17 @@ impl Workspace {
                 self.search_walk(&path, query, names, contents, limit)?;
                 continue;
             }
-            if relative.is_empty() || !is_note(&child.path()) || names.len() + contents.len() >= limit {
+            if relative.is_empty()
+                || !is_note(&child.path())
+                || names.len() + contents.len() >= limit
+            {
                 continue;
             }
             if name.to_lowercase().contains(query) {
-                names.push(SearchResult { path, snippet: relative.into() });
+                names.push(SearchResult {
+                    path,
+                    snippet: relative.into(),
+                });
                 continue;
             }
             let content = match fs::read_to_string(child.path()) {
@@ -259,11 +307,23 @@ impl Workspace {
             };
             let haystack = content.to_lowercase();
             if let Some(index) = haystack.find(query) {
-                let start = content[..index].char_indices().rev().nth(24).map(|(i, _)| i).unwrap_or(0);
-                let end = content[index..].char_indices().nth(100).map(|(i, _)| index + i).unwrap_or(content.len());
+                let start = content[..index]
+                    .char_indices()
+                    .rev()
+                    .nth(24)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                let end = content[index..]
+                    .char_indices()
+                    .nth(100)
+                    .map(|(i, _)| index + i)
+                    .unwrap_or(content.len());
                 contents.push(SearchResult {
                     path,
-                    snippet: content[start..end].split_whitespace().collect::<Vec<_>>().join(" "),
+                    snippet: content[start..end]
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" "),
                 });
             }
         }
@@ -278,7 +338,7 @@ impl Workspace {
         }
         let mut names = Vec::new();
         let mut contents = Vec::new();
-        self.search_walk("", &query, &mut names, &mut contents, limit.min(100).max(1))?;
+        self.search_walk("", &query, &mut names, &mut contents, limit.clamp(1, 100))?;
         names.extend(contents);
         Ok(names)
     }
@@ -390,11 +450,20 @@ impl Workspace {
             if source.starts_with(&self.root) {
                 return Err("This note is already inside the Lotus workspace.".into());
             }
-            let original = source.file_name().ok_or("Invalid Markdown filename.")?
-                .to_string_lossy().to_string();
+            let original = source
+                .file_name()
+                .ok_or("Invalid Markdown filename.")?
+                .to_string_lossy()
+                .to_string();
             valid_name(&original)?;
-            let stem = source.file_stem().ok_or("Invalid Markdown filename.")?.to_string_lossy();
-            let extension = source.extension().ok_or("Invalid Markdown filename.")?.to_string_lossy();
+            let stem = source
+                .file_stem()
+                .ok_or("Invalid Markdown filename.")?
+                .to_string_lossy();
+            let extension = source
+                .extension()
+                .ok_or("Invalid Markdown filename.")?
+                .to_string_lossy();
             let mut number = 2usize;
             let mut name = original.clone();
             while destination.join(&name).exists() {

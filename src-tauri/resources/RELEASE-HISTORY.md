@@ -1,41 +1,110 @@
 # Lotus release history
 
-This is Lotus’s built-in release record. It is stored with the application, not in a vault, and opens read-only from **Settings → About**.
+This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
-## 0.14.5 — Local model restart
+## 0.14.9 — 2026-09-14 — Native in-app browser tabs
 
-- Lotus now remembers the approved GGUF path alongside the runtime model ID.
-- A saved Lotus local model automatically starts again when you send a chat request after restarting the app.
-- Older local connections are migrated by locating their GGUF in the approved model folders.
-- This fixes the mismatch where llama.cpp reported a full-path model ID while Lotus later attempted to chat using only the filename.
+- Added an **Open browser** globe button directly beside Settings in the top menu. It opens a normal Lotus tab with a DuckDuckGo start page, address field, Back, Forward, and Reload controls.
+- Implemented browser content as a native Tauri/WebView2 child webview instead of an iframe. This lets ordinary sites load even when they prohibit embedding, keeps browser navigation in its own webview profile, and avoids adding remote websites to Lotus’s vault UI.
+- Browser tabs participate in the existing tab strip: they can be reordered, closed, and dragged onto either note-pane header. Dropping a browser on a split pane moves that browser session there; closing its tab closes the native browser webview as well.
+- Restricted Lotus-initiated browser navigation to normal `http` and `https` addresses, and only accepts internal browser-tab labels for browser navigation, history, reload, and current-address commands.
+- Enabled only the native webview lifecycle permissions required to create, show, hide, resize, move, and close the child browser view. No vault filesystem or AI-provider capability was added for web content.
 
-## 0.14.4 — Local reliability
+**Verification:** frontend lint and production frontend build passed. Native Rust compilation still requires `cargo`, which is unavailable in this workspace environment.
 
-- Fixed Lotus local-runtime model IDs so llama.cpp receives the actual ID reported by its server.
-- Repaired existing local connections automatically when their saved ID is stale.
-- Made local replies concise by default and allowed up to five minutes for a local request.
-- Made sidebar moves appear immediately while the filesystem move completes in the background.
-- Added pointer-driven tab reordering and a release-history tab.
+## 0.14.8 — 2026-09-14 — Project attribution and licensing clarity
 
-## 0.14.3 — Reliable note dragging
+- Added VISTU LAB attribution in Settings → About, identifying Lotus as an educational project.
+- Added an accurate plain-language MIT License summary in Settings → About: reuse, modification, distribution, sublicensing, and sale are permitted when the copyright and license notice are retained; the software is provided without warranty.
+- Kept the existing MIT License unchanged. Creative Commons licensing was considered but not applied because Creative Commons does not recommend its licenses for computer software.
 
-- Replaced sidebar note dragging’s WebView2-dependent drop path with Lotus pointer capture.
-- Added note placement above/below rows, note-to-folder movement, and note-to-tab-strip drops.
-- Cleared editable-table selection when clicking outside a table.
-- Changed the startup message to **Loading…**.
+**Verification:** frontend lint and production frontend build passed.
 
-## 0.14.2 — Standard drag transport
+## 0.14.7 — 2026-09-14 — Fast workspace startup
 
-- Accepted the standard text drag transport exposed by Windows WebView2.
+- Added a cached workspace-tree snapshot in the local webview profile. Lotus can now draw the previous vault structure immediately on a subsequent launch instead of waiting for a filesystem scan before the interface becomes usable. The cache contains only workspace paths, names, kinds, order, and Windows file identities—never note contents, AI conversations, or credentials.
+- Added a dedicated lightweight startup snapshot. It traverses the workspace to obtain the current names and folder structure but deliberately skips per-item Windows file-identity handle opens, which were costly in large vaults.
+- Deferred the complete identity-aware reconciliation until after the first paint. Rename detection and normal external-filesystem change handling continue to use the complete snapshot once it is available.
+- Removed redundant path canonicalisation for every child discovered during a trusted workspace traversal. The root is validated before traversal and links are still rejected, preserving the workspace boundary while avoiding thousands of repeated filesystem calls.
+- The normal workspace tree refresh remains available for changes, vault switching, and external rename reconciliation. If the optional cached snapshot is absent, invalid, oversized, or cannot be written, Lotus safely falls back to the lightweight live scan.
 
-## 0.14.1 — Tabs and manual note ordering
+**Verification:** frontend lint, focused editor-action tests, and production frontend build passed. Native Rust tests could not be run because `cargo` is unavailable in this workspace environment.
 
-- Added persistent note tabs, per-folder manual note ordering, folder moves, and tab transfer groundwork.
+## 0.14.6 — 2026-09-14 — Navigation, pane drops, local AI, and list editing
 
-## 0.14.0 — Workspace polish
+- Made unused top-tab-strip space a native Windows drag region while keeping controls and tabs interactive.
+- Added a permanent first **Current note** tab: sidebar clicks replace this anchored view; manually opened tabs remain independent.
+- Fixed the note context menu’s **Open in new tab** action so it ignores the anchored tab and opens/selects an independent one.
+- Extended pointer note drops to the tab strip and either note header. A sidebar note replaces only its target pane; dropping a top tab on a pane leaves the source tab open.
+- Increased local GGUF chat output from 384 to 1,536 tokens and local edit output to 2,048. Local chat now retains a useful partial reply with a continuation notice if a reasoning-heavy model still reaches its limit; incomplete edits remain rejected.
+- Fixed bullet and numbered-list insertion so typing preserves the list marker. Added a left-aligned orange release-history link in Settings → About.
 
-- Added the About section, local computer information, model-library improvements, and local model controls.
+**Verification:** frontend lint, focused list-action tests, and production frontend builds passed. Native Rust tests require `cargo`, which was unavailable in this workspace environment.
 
-## Earlier Lotus and Notus releases
+## 0.14.5 — 2026-09-11 — Local model restart
 
-The earlier release series established local Markdown vaults, note editing, tables, diagrams, split panes, import/export, trash, AI chat and editing, model settings, Hugging Face browsing and downloads, sidebar organization, themes, and Windows installers. This document will be extended for every future Lotus release.
+- Saved the approved GGUF path alongside the server-reported local model ID and restarts saved local models automatically after an app restart.
+- Migrates older local connections by finding the matching GGUF in approved folders, resolving the filename-versus-full-path model-ID mismatch.
+
+## 0.14.4 — 2026-09-11 — Local runtime and drag reliability
+
+- Repaired stale local model IDs, allowed more time for local requests, added pointer-driven tab reordering, made sidebar moves feel immediate, and introduced the release-history tab.
+
+## 0.14.3 — 2026-09-11 — Reliable note dragging
+
+- Replaced WebView2-dependent sidebar-note drops with pointer capture; added note ordering, note-to-folder movement, note-to-tab-strip drops, outside table-selection dismissal, and clearer startup feedback.
+
+## 0.14.2 — 2026-09-11 — Standard drag transport
+
+- Added compatibility for WebView2’s standard text drag payload.
+
+## 0.14.1 — 2026-09-11 — Tabs and ordering
+
+- Added note tabs, per-folder manual ordering, folder movement, and cross-window tab-transfer groundwork.
+
+## 0.14.0 — 2026-09-10 — Local model management
+
+- Added About and computer-information views, a local-model library, Hugging Face GGUF browsing/downloads, local runtime controls, and assistant/startup refinements.
+
+## 0.13.1 — 2026-09-09 — Additional AI providers
+
+- Added Google Gemini, NVIDIA, and named Custom HTTPS-compatible providers while retaining Groq and OpenRouter.
+- Added editable model IDs, optional discovery, Test & save validation, custom-endpoint trust acknowledgement, strict URL validation, and connection-specific consent text. Credentials remain in Windows Credential Manager.
+
+## 0.13.0 — 2026-09-09 — AI assistant
+
+- Added the resizable assistant pane, chat, note/selection context, session-only history, safe edit previews, explicit transmission acknowledgement, and revision/lock/conflict checks before applying an edit.
+
+## 0.12.0 — 2026-09-09 — Workspace transfer and interaction polish
+
+- Added portable ZIP export/import with preview, checksums, selected destination, optional vault/Trash/settings contents, and non-overwriting imports. Refined navigation, search, inline naming, table selection, vault settings, and narrow layouts.
+
+## 0.11.0 — 2026-09-09 — Navigation and Markdown refinement
+
+- Added hanging nested/wrapped list presentation, dedicated search, refined bookmarks/Organizer actions, internal and web links, live formatting behavior, callout spacing, and external filesystem refresh/conflict recovery.
+
+## 0.10.0 — 2026-09-09 — Split panes and editor polish
+
+- Added note/header drops in both split orientations, inline folder/note creation, typed Properties, visual formatting toggles, callouts, table sizing, toolbar Undo, Mermaid editing, and the revised settings layout.
+
+## 0.9.0 — 2026-09-09 — Symmetric note workspace
+
+- Completed mirrored side-by-side/top-bottom split panes, editable filename titles, width preferences, bookmark placement, refined context-menu behavior, inline creation, vault-area controls, and Lotus icon assets.
+
+## 0.8.0 — 2026-09-09 — Structured Markdown workspace
+
+- Expanded Markdown tables, YAML Properties, submenus, colors, links, bookmarks, split views, Organizer, search, and vault conversion with collision-safe previews and internal Trash.
+
+## 0.7.0 — 2026-09-09 — Lotus rebrand
+
+- Rebranded Notus as Lotus across the application, installer, titles, and shortcuts while retaining compatible workspace/state locations. Added compact navigation, live Markdown previews, Properties, table interactions, split panes, and Organizer workflows.
+
+## Notus 0.6.1–0.2.0 — 2026-09-08 to 2026-09-09 — Foundation
+
+- **0.6.1:** table row/column selection, per-note alignment, first-column highlighting, refined search, dense sidebar rows, and Organizer scrolling.
+- **0.6.0:** areas/icons, vault setup/import, close-only tabs, lock/save indicators, typography controls, and editable Markdown tables.
+- **0.5.0:** vault Organizer, workspace areas, tab scrolling/reordering, typography preferences, cross-vault movement, and recoverable Trash.
+- **0.4.0:** native tabs, detached windows, tab transfer/reattachment, autosave, locking, conflicts, and internal Trash.
+- **0.3.0–0.2.0:** local-first Tauri/React Markdown workspace, vault/folder/note hierarchy, native title bar, create/rename/move, autosave/recovery, imports, themes, and Windows packaging.
+
+**Compatibility:** Lotus uses ordinary UTF-8 Markdown, YAML frontmatter, and standard Markdown tables. Widths, alignment, bookmarks, areas, and UI state remain local preferences outside note files. Windows installers are unsigned; notes are not uploaded unless a configured AI provider is explicitly sent user-selected context.

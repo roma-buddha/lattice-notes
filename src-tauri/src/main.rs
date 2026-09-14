@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod conversion;
 mod ai;
+mod conversion;
 mod layout;
 mod storage;
 mod transfer;
@@ -48,7 +48,8 @@ fn register_tab_strip(
     state: tauri::State<Store>,
     bounds: TabStripInput,
 ) -> Result<(), String> {
-    if bounds.width <= 0.0 || bounds.height <= 0.0 || !bounds.x.is_finite() || !bounds.y.is_finite() {
+    if bounds.width <= 0.0 || bounds.height <= 0.0 || !bounds.x.is_finite() || !bounds.y.is_finite()
+    {
         return Err("Invalid tab strip bounds.".into());
     }
     let origin = window.inner_position().map_err(|e| e.to_string())?;
@@ -61,7 +62,11 @@ fn register_tab_strip(
         scale,
         client_origin_x: origin.x as f64,
     };
-    state.tab_strips.lock().map_err(|e| e.to_string())?.insert(window.label().into(), physical);
+    state
+        .tab_strips
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(window.label().into(), physical);
     Ok(())
 }
 
@@ -90,9 +95,100 @@ fn tab_drop_target(
 
 #[tauri::command]
 fn release_history(app: tauri::AppHandle) -> Result<String, String> {
-    let path = app.path().resource_dir().map_err(|e| e.to_string())?
-        .join("resources").join("RELEASE-HISTORY.md");
-    fs::read_to_string(path).map_err(|_| "Lotus release history is unavailable. Reinstall Lotus and try again.".into())
+    let path = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("resources")
+        .join("RELEASE-HISTORY.md");
+    fs::read_to_string(path)
+        .map_err(|_| "Lotus release history is unavailable. Reinstall Lotus and try again.".into())
+}
+fn browser_label(label: &str) -> Result<(), String> {
+    let Some(suffix) = label.strip_prefix("browser-") else {
+        return Err("Invalid browser tab.".into());
+    };
+    if suffix.is_empty()
+        || label.len() > 80
+        || !suffix
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '-')
+    {
+        return Err("Invalid browser tab.".into());
+    }
+    Ok(())
+}
+fn browser_url(value: &str) -> Result<tauri::webview::Url, String> {
+    let url = tauri::webview::Url::parse(value.trim()).map_err(|_| "Enter a valid web address.")?;
+    if !["http", "https"].contains(&url.scheme()) || url.host_str().is_none() {
+        return Err("Browser tabs can open only normal HTTP or HTTPS web addresses.".into());
+    }
+    Ok(url)
+}
+fn browser_view(app: &tauri::AppHandle, label: &str) -> Result<tauri::Webview, String> {
+    browser_label(label)?;
+    app.get_webview(label)
+        .ok_or("Browser tab is no longer open.".into())
+}
+fn browser_command_source(webview: &tauri::Webview) -> Result<(), String> {
+    if webview.label().starts_with("browser-") {
+        return Err("Browser pages cannot access Lotus browser controls.".into());
+    }
+    Ok(())
+}
+#[tauri::command]
+fn browser_navigate(
+    webview: tauri::Webview,
+    app: tauri::AppHandle,
+    label: String,
+    url: String,
+) -> Result<String, String> {
+    browser_command_source(&webview)?;
+    let url = browser_url(&url)?;
+    browser_view(&app, &label)?
+        .navigate(url.clone())
+        .map_err(|_| "Could not open that web address.")?;
+    Ok(url.to_string())
+}
+#[tauri::command]
+fn browser_reload(
+    webview: tauri::Webview,
+    app: tauri::AppHandle,
+    label: String,
+) -> Result<(), String> {
+    browser_command_source(&webview)?;
+    browser_view(&app, &label)?
+        .reload()
+        .map_err(|_| "Could not reload this page.".into())
+}
+#[tauri::command]
+fn browser_history(
+    webview: tauri::Webview,
+    app: tauri::AppHandle,
+    label: String,
+    forward: bool,
+) -> Result<(), String> {
+    browser_command_source(&webview)?;
+    let script = if forward {
+        "history.forward()"
+    } else {
+        "history.back()"
+    };
+    browser_view(&app, &label)?
+        .eval(script)
+        .map_err(|_| "Could not navigate browser history.".into())
+}
+#[tauri::command]
+fn browser_url_current(
+    webview: tauri::Webview,
+    app: tauri::AppHandle,
+    label: String,
+) -> Result<String, String> {
+    browser_command_source(&webview)?;
+    browser_view(&app, &label)?
+        .url()
+        .map(|url| url.to_string())
+        .map_err(|_| "Could not read the current browser address.".into())
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -101,7 +197,12 @@ struct WorkspaceChange {
 }
 
 fn watch_workspace(app: &tauri::AppHandle, state: &Store) -> Result<(), String> {
-    let root = state.workspace.lock().map_err(|e| e.to_string())?.root.clone();
+    let root = state
+        .workspace
+        .lock()
+        .map_err(|e| e.to_string())?
+        .root
+        .clone();
     let emitter = app.clone();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         if let Ok(event) = event {
@@ -109,12 +210,17 @@ fn watch_workspace(app: &tauri::AppHandle, state: &Store) -> Result<(), String> 
             // creates, deletes, and renames, rather than every autosave.
             let structural = matches!(
                 event.kind,
-                EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_))
+                EventKind::Create(_)
+                    | EventKind::Remove(_)
+                    | EventKind::Modify(ModifyKind::Name(_))
             );
             let _ = emitter.emit("lotus-workspace-changed", WorkspaceChange { structural });
         }
-    }).map_err(|e| e.to_string())?;
-    watcher.watch(&root, RecursiveMode::Recursive).map_err(|e| e.to_string())?;
+    })
+    .map_err(|e| e.to_string())?;
+    watcher
+        .watch(&root, RecursiveMode::Recursive)
+        .map_err(|e| e.to_string())?;
     *state.watcher.lock().map_err(|e| e.to_string())? = Some(watcher);
     Ok(())
 }
@@ -146,8 +252,23 @@ fn snapshot(state: tauri::State<Store>) -> Result<Snapshot, String> {
         .snapshot()
 }
 #[tauri::command]
-fn search_notes(state: tauri::State<Store>, query: String) -> Result<Vec<workspace::SearchResult>, String> {
-    state.workspace.lock().map_err(|e| e.to_string())?.search(&query, 80)
+fn startup_snapshot(state: tauri::State<Store>) -> Result<Snapshot, String> {
+    state
+        .workspace
+        .lock()
+        .map_err(|e| e.to_string())?
+        .startup_snapshot()
+}
+#[tauri::command]
+fn search_notes(
+    state: tauri::State<Store>,
+    query: String,
+) -> Result<Vec<workspace::SearchResult>, String> {
+    state
+        .workspace
+        .lock()
+        .map_err(|e| e.to_string())?
+        .search(&query, 80)
 }
 #[tauri::command]
 fn read_note(state: tauri::State<Store>, path: String) -> Result<Document, String> {
@@ -430,6 +551,34 @@ async fn import_backup(
     watch_workspace(&app, &state)?;
     Ok(Some(restored))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{browser_label, browser_url};
+
+    #[test]
+    fn browser_tabs_accept_only_safe_labels_and_web_addresses() {
+        assert!(browser_label("browser-12").is_ok());
+        assert!(browser_label("browser-tab-12").is_ok());
+        for label in ["browser-", "note-12", "browser-12/other", "browser-💥"] {
+            assert!(browser_label(label).is_err(), "{label}");
+        }
+
+        assert_eq!(
+            browser_url("https://example.com/path").unwrap().as_str(),
+            "https://example.com/path"
+        );
+        for address in [
+            "file:///C:/secret.txt",
+            "javascript:alert(1)",
+            "mailto:hello@example.com",
+            "https://",
+        ] {
+            assert!(browser_url(address).is_err(), "{address}");
+        }
+    }
+}
+
 fn main() {
     // Do not inherit the launching application's taskbar identity (e.g. Codex).
     #[cfg(windows)]
@@ -500,7 +649,7 @@ fn main() {
                 watcher: Mutex::new(None),
                 tab_strips: Mutex::new(std::collections::HashMap::new()),
             };
-            watch_workspace(&app.handle(), &store).map_err(std::io::Error::other)?;
+            watch_workspace(app.handle(), &store).map_err(std::io::Error::other)?;
             app.manage(store);
             Ok(())
         })
@@ -534,6 +683,7 @@ fn main() {
             get_organizer,
             save_organizer,
             snapshot,
+            startup_snapshot,
             search_notes,
             read_note,
             write_note,
@@ -553,6 +703,10 @@ fn main() {
             register_tab_strip,
             tab_drop_target,
             release_history,
+            browser_navigate,
+            browser_reload,
+            browser_history,
+            browser_url_current,
             windows::list_trash,
             windows::restore_trash,
             windows::purge_trash,

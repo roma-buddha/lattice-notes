@@ -65,6 +65,8 @@ import { splitFrontmatter, relativeNoteLink } from "./core/markdown";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { NoteHeader } from "./NoteHeader";
 import { ContextMenu } from "./ContextMenu";
+import { BrowserPane, closeBrowserSession } from "./BrowserPane";
+import type { BrowserSession } from "./browserSession";
 
 // These panels are useful, but they should not delay the first usable Lotus window.
 const MarkdownView = lazy(() =>
@@ -125,6 +127,31 @@ const storage = {
   set: (key: string, value: string) => localStorage.setItem(key, value),
   remove: (key: string) => localStorage.removeItem(key),
 };
+const browserTitle = (url: string) => {
+  try { return new URL(url).hostname.replace(/^www\./, "") || "Browser"; }
+  catch { return "Browser"; }
+};
+const workspaceSnapshotCache = "lotus-workspace-snapshot-v1";
+function cachedWorkspaceSnapshot(): Snapshot {
+  try {
+    const saved = storage.get(workspaceSnapshotCache);
+    if (!saved || saved.length > 4_000_000) return { root: "", entries: [] };
+    const value = JSON.parse(saved) as Partial<Snapshot>;
+    if (
+      typeof value.root !== "string" ||
+      !Array.isArray(value.entries) ||
+      !value.entries.every((entry) => entry && typeof entry === "object")
+    )
+      return { root: "", entries: [] };
+    return {
+      root: value.root,
+      entries: value.entries as Entry[],
+      legacy_root: typeof value.legacy_root === "string" ? value.legacy_root : null,
+    };
+  } catch {
+    return { root: "", entries: [] };
+  }
+}
 function Icon({
   label,
   children,
@@ -192,8 +219,8 @@ function Modal({
   );
 }
 export default function App() {
-  const [snapshot, setSnapshot] = useState<Snapshot>({ root: "", entries: [] });
-  const [loading, setLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState<Snapshot>(cachedWorkspaceSnapshot);
+  const [loading, setLoading] = useState(() => !cachedWorkspaceSnapshot().root);
   const [selected, setSelected] = useState("");
   const [doc, setDoc] = useState<Document | null>(null);
   const [draft, setDraft] = useState("");
@@ -284,6 +311,7 @@ export default function App() {
   const [secondaryDoc, setSecondaryDoc] = useState<Document | null>(null);
   const [secondarySaveError, setSecondarySaveError] = useState(false);
   const [secondaryDraft, setSecondaryDraft] = useState("");
+  const [secondaryBrowser, setSecondaryBrowser] = useState<BrowserSession | null>(null);
   const secondaryRef = useRef<{ doc: Document | null; draft: string }>({
     doc: null,
     draft: "",
@@ -365,10 +393,12 @@ export default function App() {
   const [inline, setInline] = useState<InlineEdit | null>(null);
   const [hiddenVaults, setHiddenVaults] = useState<string[]>([]);
   const [hiddenPanel, setHiddenPanel] = useState<Anchor | null>(null);
-  const [tabs, setTabs] = useState<NoteTab[]>([]);
-  const [activeTab, setActiveTab] = useState(1);
+  const [tabs, setTabs] = useState<NoteTab[]>(() =>
+    detached ? [] : [{ id: 0, path: null, pinned: true }],
+  );
+  const [activeTab, setActiveTab] = useState(0);
   const tabSequence = useRef(1);
-  const activeTabRef = useRef(1);
+  const activeTabRef = useRef(0);
   const inlineTrigger = useRef<HTMLElement | null>(null);
   const inlineBusy = useRef(false);
   const [name, setName] = useState("");
@@ -389,6 +419,7 @@ export default function App() {
   const organizerActive =
     tabs.find((t) => t.id === activeTab)?.organizer === true;
   const releaseActive = tabs.find((t) => t.id === activeTab)?.release === true;
+  const browserActive = tabs.find((t) => t.id === activeTab)?.browser;
   const files = useMemo(() => flatten(visibleEntries), [visibleEntries]);
   const selectedEntry = files.find((e) => e.path === selected);
   const folder =
@@ -504,6 +535,15 @@ export default function App() {
   };
   const latestSnapshot = useRef(snapshot);
   latestSnapshot.current = snapshot;
+  useEffect(() => {
+    if (!snapshot.root) return;
+    try {
+      const value = JSON.stringify(snapshot);
+      if (value.length <= 4_000_000) storage.set(workspaceSnapshotCache, value);
+    } catch {
+      // The cache is a convenience only. A failed write must never block Lotus.
+    }
+  }, [snapshot]);
   const refresh = async () => {
     const next = await api.snapshot();
     const moves = externalMoves(latestSnapshot.current.entries, next.entries);
@@ -775,6 +815,7 @@ export default function App() {
     secondaryRef.current = { doc: null, draft: "" };
     setSecondaryDoc(null);
     setSecondaryDraft("");
+    setSecondaryBrowser(null);
     setActivePane("primary");
     setSplitView(null);
   };
@@ -897,8 +938,9 @@ export default function App() {
         cancelled = true;
       };
     }
+    let backgroundRefresh: number | undefined;
     void api
-      .snapshot()
+      .startupSnapshot()
       .then(async (next) => {
         if (cancelled) return;
         if(next.legacy_root) importSettings(exportSettings(next.legacy_root),next.legacy_root,next.root,false);
@@ -948,6 +990,12 @@ export default function App() {
             setSelected(note.path);
           }
         } else setSelected("");
+        // The first response omits expensive Windows file identities.  Render it
+        // now, then reconcile the complete identity-aware tree after the window
+        // has had a chance to paint.
+        backgroundRefresh = window.setTimeout(() => {
+          if (!cancelled) void live.current.refresh().catch(() => {});
+        }, 100);
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
@@ -957,6 +1005,7 @@ export default function App() {
       });
     return () => {
       cancelled = true;
+      if (backgroundRefresh !== undefined) window.clearTimeout(backgroundRefresh);
     };
   }, [detached]);
   useEffect(() => {
@@ -1293,6 +1342,13 @@ export default function App() {
       if (!(await saveAll())) return;
       const tab = tabs.find((t) => t.id === id);
       if (!tab) return;
+    if (tab.browser) {
+      setSecondaryBrowser((current) => current?.id === tab.browser?.id ? null : current);
+      activeTabRef.current = id;
+        setActiveTab(id);
+        setActivePane("primary");
+        return;
+      }
       if (tab.release) {
         if (!releaseHistory) setReleaseHistory(await api.releaseHistory());
         activeTabRef.current = id;
@@ -1320,11 +1376,14 @@ export default function App() {
     if (!(await saveAll()))
       throw new Error("Save or recover the current draft first.");
     const next = await api.read(path);
-    const existing = tabs.find((t) => t.path === path);
+    const existing = tabs.find((t) => !t.pinned && t.path === path);
     const id = existing?.id ?? ++tabSequence.current;
     if (!existing) setTabs((previous) => {
       const next = [...previous];
-      const index = before === undefined ? -1 : next.findIndex((tab) => tab.id === before);
+      const targetBefore = before === 0
+        ? next.find((tab) => !tab.pinned)?.id
+        : before;
+      const index = targetBefore === undefined ? -1 : next.findIndex((tab) => tab.id === targetBefore);
       next.splice(index < 0 ? next.length : index, 0, { id, path });
       return next;
     });
@@ -1341,8 +1400,8 @@ export default function App() {
     if (!(await saveAll()))
       throw new Error("Save or recover the current draft first.");
     const next = await api.read(path);
-    // Sidebar navigation replaces this temporary view. The tab strip is only
-    // for notes deliberately dropped there by the user.
+    // Sidebar navigation always replaces the pinned first tab. Extra tabs are
+    // reserved for notes explicitly opened from the menu or dropped in the strip.
     activeTabRef.current = 0;
     setActiveTab(0);
     setTableActions(null);
@@ -1351,7 +1410,52 @@ export default function App() {
     setSelected(path);
     setError("");
   };
+  const paneDropLive = useRef({ openCurrentNote, openSecondary });
+  paneDropLive.current = { openCurrentNote, openSecondary };
+  useEffect(() => {
+    const receivePointerDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: unknown; target?: unknown }>).detail;
+      if (typeof detail?.path !== "string" || !detail.path) return;
+      if (detail.target === "primary-pane")
+        void paneDropLive.current.openCurrentNote(detail.path).catch((error) => setError(String(error)));
+      if (detail.target === "secondary-pane")
+        void paneDropLive.current.openSecondary(detail.path).catch((error) => setError(String(error)));
+    };
+    window.addEventListener("lotus-note-pointer-drop", receivePointerDrop);
+    return () => window.removeEventListener("lotus-note-pointer-drop", receivePointerDrop);
+  }, []);
+  useEffect(() => {
+    const receiveBrowserDrop = (event: Event) => {
+      const detail = (event as CustomEvent<{ browserId?: unknown; target?: unknown }>).detail;
+      const browserId = typeof detail?.browserId === "number" && Number.isInteger(detail.browserId)
+        ? detail.browserId
+        : null;
+      if (browserId === null) return;
+      const browser = tabs.find((tab) => tab.browser?.id === browserId)?.browser;
+      if (!browser) return;
+      if (detail.target === "secondary-pane") {
+        setSecondaryBrowser(browser);
+        if (activeTabRef.current === browserId) {
+          activeTabRef.current = 0;
+          setActiveTab(0);
+        }
+      } else if (detail.target === "primary-pane") {
+        setSecondaryBrowser((current) => current?.id === browserId ? null : current);
+        activeTabRef.current = browserId;
+        setActiveTab(browserId);
+        setActivePane("primary");
+      }
+    };
+    window.addEventListener("lotus-browser-pointer-drop", receiveBrowserDrop);
+    return () => window.removeEventListener("lotus-browser-pointer-drop", receiveBrowserDrop);
+  }, [tabs]);
   const closeTab = async (id: number) => {
+    const closing = tabs.find((tab) => tab.id === id);
+    if (!closing || closing.pinned) return;
+    if (closing.browser) {
+      if (secondaryBrowser?.id === closing.browser.id) setSecondaryBrowser(null);
+      await closeBrowserSession(closing.browser.id).catch(() => {});
+    }
     if (id === activeTabRef.current) {
       if (tabs.length === 1) {
         if (!(await saveAll())) return;
@@ -1369,9 +1473,14 @@ export default function App() {
   };
   const closeAll = async () => {
     if (!(await saveAll())) return;
+    await Promise.all(tabs.flatMap((tab) => tab.browser ? [closeBrowserSession(tab.browser.id).catch(() => {})] : []));
+    setSecondaryBrowser(null);
     await closeSplit();
     resetDocument();
-    setTabs([]);
+    if (detached) setTabs([]);
+    else setTabs([{ id: 0, path: null, pinned: true }]);
+    activeTabRef.current = detached ? 1 : 0;
+    setActiveTab(detached ? 1 : 0);
     storage.remove(`notus-last:${current.current.root}`);
   };
   const openOrganizer = async () => {
@@ -1399,6 +1508,20 @@ export default function App() {
     activeTabRef.current = id;
     setActiveTab(id);
     resetDocument();
+    setSettings(false);
+  };
+  const openBrowser = async () => {
+    if (!(await saveAll())) return;
+    const id = ++tabSequence.current;
+    const url = "https://duckduckgo.com/";
+    setTabs((previous) => [...previous, {
+      id,
+      path: null,
+      browser: { id, url, title: browserTitle(url) },
+    }]);
+    activeTabRef.current = id;
+    setActiveTab(id);
+    setActivePane("primary");
     setSettings(false);
   };
   const addVault = async () => {
@@ -1634,13 +1757,19 @@ export default function App() {
       setSplitView(null);
       setActivePane("primary");
     }
-    const remaining = tabs.filter((tab) => !tab.path || !belongs(tab.path));
+    const remaining = tabs.flatMap((tab) =>
+      tab.pinned && tab.path && belongs(tab.path)
+        ? [{ ...tab, path: null }]
+        : !tab.path || !belongs(tab.path)
+          ? [tab]
+          : [],
+    );
     setTabs(remaining);
     const path = current.current.doc?.path;
     if (path && belongs(path)) {
       storage.remove(draftKey(path));
       resetDocument();
-      const next = remaining[0];
+      const next = remaining.find((tab) => tab.path) ?? remaining[0];
       activeTabRef.current = next?.id ?? 0;
       setActiveTab(next?.id ?? 0);
       if (next?.path)
@@ -1732,9 +1861,9 @@ export default function App() {
       /* Ignore malformed UI preferences. */
     }
     setHiddenVaults(hidden);
-    activeTabRef.current = 1;
-    setActiveTab(1);
-    setTabs([]);
+    activeTabRef.current = detached ? 1 : 0;
+    setActiveTab(detached ? 1 : 0);
+    setTabs(detached ? [] : [{ id: 0, path: null, pinned: true }]);
     setVaultPath("");
     setInline(null);
     setActions(null);
@@ -1761,7 +1890,7 @@ export default function App() {
   };
   const detachTab = async (id: number, atCursor: boolean) => {
     const tab = tabs.find((t) => t.id === id);
-    if (!tab?.path || !(await saveAll())) return;
+    if (!tab?.path || tab.pinned || !(await saveAll())) return;
     if (!(await api.detach(tab.path, atCursor))) return;
     await closeTab(id);
     if (detached && tabs.filter((t) => t.path).length === 1)
@@ -1793,15 +1922,16 @@ export default function App() {
       if (before === transfer.id) return;
       setTabs((previous) => {
         const moving = previous.find((t) => t.id === transfer.id);
-        if (!moving) return previous;
+        if (!moving || moving.pinned) return previous;
         const rest = previous.filter((t) => t.id !== transfer.id);
+        if (before === 0) before = rest.find((tab) => !tab.pinned)?.id;
         const at = before
           ? rest.findIndex((t) => t.id === before)
           : rest.length;
         rest.splice(Math.max(0, at < 0 ? rest.length : at), 0, moving);
         return rest;
       });
-    } else await openExtraTab(transfer.path);
+    } else if (transfer.path) await openExtraTab(transfer.path);
   };
   const returnTab = async (id: number) => {
     const tab = tabs.find((t) => t.id === id);
@@ -1864,6 +1994,7 @@ export default function App() {
       }),
       listen<Transfer>("notus-transfer-ready", async ({ payload }) => {
         if (payload.target !== getCurrentWindow().label) return;
+        if (!payload.path) return;
         try {
           await transferLive.current.openExtraTab(
             payload.path,
@@ -1975,6 +2106,7 @@ export default function App() {
       </a>
       <TitleBar
         settings={() => setSettings(true)}
+        browser={() => run(openBrowser)}
         split={(button) => setSplitMenu(anchorAt(button))}
         tabContext={(id, e) =>
           setTabMenu({
@@ -2330,6 +2462,18 @@ export default function App() {
                 /></Suspense>
               </div>
             </section>
+          ) : browserActive ? (
+            <section className="note-view browser-note-view">
+              <BrowserPane
+                browser={browserActive}
+                onError={setError}
+                onAddress={(url) => setTabs((previous) => previous.map((tab) =>
+                  tab.browser?.id === browserActive.id
+                    ? { ...tab, browser: { ...tab.browser, url, title: browserTitle(url) } }
+                    : tab,
+                ))}
+              />
+            </section>
           ) : doc ? (
             <section className="note-view">
               <div className="note-ai-layout">
@@ -2368,14 +2512,8 @@ export default function App() {
                       !!editorView.current &&
                       undoDepth(editorView.current.state) > 0
                     }
-                    drop={(path) =>
-                      run(async () => {
-                        if (await saveAll()) {
-                          setActivePane("primary");
-                          await openExtraTab(path);
-                        }
-                      })
-                    }
+                    drop={(path) => run(() => openCurrentNote(path))}
+                    dropTarget="primary-pane"
                     rename={(name) => renameNote(doc.path, name)}
                     ai={() => { setAiPane("primary"); preserveNotePosition([editorView.current, secondaryEditor.current], () => setAiOpen(true)); }}
                     close={splitView ? () => run(closePrimaryPane) : undefined}
@@ -2507,7 +2645,7 @@ export default function App() {
                     )}
                   </div>
                 </section>
-                {splitView && secondaryNote && (
+                {splitView && (secondaryNote || secondaryBrowser) && (
                   <>
                     <div
                       className="pane-divider"
@@ -2600,6 +2738,19 @@ export default function App() {
                         }
                       }}
                     >
+                      {secondaryBrowser ? (
+                        <BrowserPane
+                          browser={secondaryBrowser}
+                          onError={setError}
+                          onAddress={(url) => {
+                            const updated = { ...secondaryBrowser, url, title: browserTitle(url) };
+                            setSecondaryBrowser(updated);
+                            setTabs((previous) => previous.map((tab) =>
+                              tab.browser?.id === updated.id ? { ...tab, browser: updated } : tab,
+                            ));
+                          }}
+                        />
+                      ) : secondaryNote && <>
                       <NoteHeader
                         note={secondaryNote}
                         status={
@@ -2627,6 +2778,7 @@ export default function App() {
                           undoDepth(secondaryEditor.current.state) > 0
                         }
                         drop={(path) => run(() => openSecondary(path))}
+                        dropTarget="secondary-pane"
                         rename={(name) => renameNote(secondaryNote.path, name)}
                         ai={() => { setAiPane("secondary"); preserveNotePosition([editorView.current, secondaryEditor.current], () => setAiOpen(true)); }}
                         close={() => run(closeSplit)}
@@ -2725,6 +2877,7 @@ export default function App() {
                           /></Suspense>
                         )}
                       </div>
+                      </>}
                     </section>
                   </>
                 )}
@@ -3008,6 +3161,19 @@ export default function App() {
                   await selectTab(tabMenu.id);
                   await startSplit("down");
                 }),
+            },
+            {
+              label: "Show in second pane",
+              disabled: !splitView || !tabs.find((t) => t.id === tabMenu.id)?.browser,
+              run: () => {
+                const browser = tabs.find((t) => t.id === tabMenu.id)?.browser;
+                if (!browser) return;
+                setSecondaryBrowser(browser);
+                if (activeTabRef.current === browser.id) {
+                  activeTabRef.current = 0;
+                  setActiveTab(0);
+                }
+              },
             },
             {
               label: "Open in new window",
