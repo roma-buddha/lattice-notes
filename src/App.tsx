@@ -783,6 +783,14 @@ export default function App() {
         ? current.current.doc
         : await api.read(path);
     if (!next) return;
+    // A note dropped onto a browser pane replaces that pane's visible content.
+    // Keep the browser tab in the tab strip, but hide its native child surface
+    // before the note becomes the secondary document.
+    const replacedBrowser = secondaryBrowser;
+    if (replacedBrowser) {
+      setSecondaryBrowser(null);
+      void hideBrowserSession(replacedBrowser.id).catch(() => {});
+    }
     let text = next.content;
     const recovery = storage.get(draftKey(path));
     if (recovery) {
@@ -1300,23 +1308,34 @@ export default function App() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     let lastFolderTarget = "";
+    let clearFolderTargetTimer: number | undefined;
+    const clearFolderTarget = () => {
+      lastFolderTarget = "";
+      setExternalDropTarget("");
+    };
     const folderAt = (position: { x: number; y: number }) => {
-      // Tauri can report physical pixels on high-DPI Windows displays, while
-      // DOM hit testing is in CSS pixels. Try both so an external Explorer
-      // drag reliably finds closed and expanded folder rows.
+      // Tauri reports physical pixels on Windows, while row bounds are CSS
+      // pixels. Compare against the rows themselves rather than using
+      // elementsFromPoint: a native WebView2 child can sit above DOM hit
+      // testing even though the Explorer drag is physically over the sidebar.
       const scale = window.devicePixelRatio || 1;
       for (const [x, y] of [
-        [position.x, position.y],
         [position.x / scale, position.y / scale],
+        // The fallback also supports older WebView2/Tauri combinations that
+        // have already converted the event position to logical pixels.
+        [position.x, position.y],
       ]) {
-        const row = document
-          .elementsFromPoint(x, y)
-          .find(
-            (element) =>
-              element.matches(".tree-row.kind-folder[data-path]") ||
-              !!element.closest(".tree-row.kind-folder[data-path]"),
-          )
-          ?.closest<HTMLElement>(".tree-row.kind-folder[data-path]");
+        const row = [...document.querySelectorAll<HTMLElement>(
+          ".tree-row.kind-folder[data-path]",
+        )].find((element) => {
+          const bounds = element.getBoundingClientRect();
+          return (
+            x >= bounds.left &&
+            x <= bounds.right &&
+            y >= bounds.top &&
+            y <= bounds.bottom
+          );
+        });
         if (row?.dataset.path) return row.dataset.path;
       }
       return "";
@@ -1324,16 +1343,24 @@ export default function App() {
     void getCurrentWindow()
       .onDragDropEvent((event) => {
         if (event.payload.type === "leave") {
-          lastFolderTarget = "";
-          setExternalDropTarget("");
+          // Moving an Explorer drag between the main WebView and a browser
+          // child view produces a window-level leave/re-enter pair. Keep the
+          // last folder briefly so that handoff cannot turn a valid drop into
+          // an un-targeted one; a genuine leave still clears its highlight.
+          if (clearFolderTargetTimer !== undefined)
+            window.clearTimeout(clearFolderTargetTimer);
+          clearFolderTargetTimer = window.setTimeout(clearFolderTarget, 350);
           return;
+        }
+        if (clearFolderTargetTimer !== undefined) {
+          window.clearTimeout(clearFolderTargetTimer);
+          clearFolderTargetTimer = undefined;
         }
         const target = folderAt(event.payload.position) || lastFolderTarget;
         if (target) lastFolderTarget = target;
         setExternalDropTarget(target);
         if (event.payload.type !== "drop") return;
-        lastFolderTarget = "";
-        setExternalDropTarget("");
+        clearFolderTarget();
         const sources = event.payload.paths.filter((path) =>
           /\.(md|markdown)$/i.test(path),
         );
@@ -1363,6 +1390,8 @@ export default function App() {
       .catch((error) => setError(String(error)));
     return () => {
       disposed = true;
+      if (clearFolderTargetTimer !== undefined)
+        window.clearTimeout(clearFolderTargetTimer);
       unlisten?.();
     };
   }, []);

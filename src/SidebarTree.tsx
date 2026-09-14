@@ -32,6 +32,26 @@ const mayBeLotusDrag = (event: React.DragEvent) =>
   ["application/x-lotus-note", "notus-note", "notus-folder", "text/plain"].some(
     (type) => event.dataTransfer.types.includes(type),
   );
+const paneAt = (clientX: number, clientY: number) => {
+  // A browser pane is a native WebView2 child, which sits above DOM hit
+  // testing. Pane geometry remains available, so pointer drags can still
+  // replace it with a note just like they replace an ordinary note pane.
+  for (const target of ["primary-pane", "secondary-pane"] as const) {
+    const pane = [...document.querySelectorAll<HTMLElement>(
+      `[data-lotus-drop="${target}"]`,
+    )].find((element) => {
+      const rect = element.getBoundingClientRect();
+      return (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      );
+    });
+    if (pane) return target;
+  }
+  return undefined;
+};
 export function InlineName({
   value,
   error,
@@ -205,6 +225,7 @@ export function SidebarTree(props: Props) {
                     suppressClick.current = true;
                     setPointerDragging(drag.path);
                   }
+                  const pane = paneAt(event.clientX, event.clientY);
                   const target = document
                     .elementFromPoint(event.clientX, event.clientY)
                     ?.closest<HTMLElement>(
@@ -221,6 +242,14 @@ export function SidebarTree(props: Props) {
                         "pointer-drop-target",
                       ),
                     );
+                  if (pane) {
+                    document
+                      .querySelector<HTMLElement>(
+                        `[data-lotus-drop="${pane}"]`,
+                      )
+                      ?.classList.add("pointer-drop-target");
+                    return;
+                  }
                   if (!target || target.dataset.path === drag.path) return;
                   if (target.dataset.lotusDrop) {
                     target.classList.add("pointer-drop-target");
@@ -266,18 +295,20 @@ export function SidebarTree(props: Props) {
                     }, 0);
                     return;
                   }
+                  const pane = paneAt(event.clientX, event.clientY);
                   const target = document
                     .elementFromPoint(event.clientX, event.clientY)
                     ?.closest<HTMLElement>(
                       "[data-path], [data-tab-id], [data-lotus-drop]",
                     );
                   const tabId = Number(target?.dataset.tabId);
-                  if (target?.dataset.lotusDrop || Number.isInteger(tabId)) {
+                  const paneTarget = pane ?? target?.dataset.lotusDrop;
+                  if (paneTarget || Number.isInteger(tabId)) {
                     window.dispatchEvent(
                       new CustomEvent("lotus-note-pointer-drop", {
                         detail: {
                           path: drag.path,
-                          target: target?.dataset.lotusDrop,
+                          target: paneTarget,
                           tabId: Number.isInteger(tabId) ? tabId : undefined,
                         },
                       }),

@@ -2,6 +2,16 @@
 
 This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
+## 1.0.1 — 2026-09-14 — Native browser and drop reliability
+
+- Removed the white flicker while resizing a split that contains a browser. An established native WebView2 browser now resizes in place; it is hidden only during its initial placement.
+- Made either split pane a reliable note-drop target even when that pane contains a browser. Dragging a sidebar note or a top note tab over a browser replaces that pane with the note while retaining the browser tab for later use.
+- Restored external Markdown import reliability. Explorer `.md` and `.markdown` drops now locate sidebar folders from their geometry with high-DPI support and retain the intended target across a short native browser-WebView handoff.
+
+**Compatibility:** no vault, note, draft, browser-profile, organizer, or AI-connection migration is required. Existing Lotus workspaces remain compatible.
+
+**Verification:** TypeScript production build, frontend lint, 35 frontend tests, and isolated native browser/tab/split smoke coverage passed before packaging.
+
 ## 1.0.0 — 2026-09-14 — Stable MVP
 
 - Established Lotus’s first stable public release: a local Markdown workspace with vaults, folders, notes, organized tabs, editable Markdown, split views, local drafts/recovery, import/export, and configurable AI connections.

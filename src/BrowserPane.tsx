@@ -126,7 +126,9 @@ export function BrowserPane({
         );
         const bounds = `${position.x},${position.y},${size.width},${size.height}`;
         let child = view.current ?? (await Webview.getByLabel(label));
+        let newlyCreated = false;
         if (!child) {
+          newlyCreated = true;
           child = await browserWebview(appWindow, label, browser.id, nextUrl);
         }
         if (disposed) {
@@ -135,10 +137,11 @@ export function BrowserPane({
         }
         view.current = child;
         if (bounds !== lastBounds) {
-          // New native child views briefly start at their construction bounds.
-          // Hide only while changing bounds; URL updates do not tear this view
-          // down, so an old effect cannot hide a newly navigated browser.
-          await child.hide().catch(() => {});
+          // A newly-created child briefly starts at 1×1 in the top-left, so
+          // hide it until its first real placement. After that, resize it in
+          // place: hiding/showing an established WebView2 surface for every
+          // split-divider pixel produces the visible white flash.
+          if (newlyCreated) await child.hide().catch(() => {});
           await child.setPosition(position);
           await child.setSize(size);
           lastBounds = bounds;
