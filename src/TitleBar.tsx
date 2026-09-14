@@ -289,7 +289,6 @@ export function TitleBar({
       <div
         className={`tab-strip ${dragOver ? "tab-drop-target" : ""}`}
         ref={strip}
-        data-tauri-drag-region
         data-lotus-drop="tabs"
         onWheel={(event) => {
           if (strip.current)
@@ -381,6 +380,7 @@ export function TitleBar({
               if (event.currentTarget.hasPointerCapture(event.pointerId))
                 event.currentTarget.releasePointerCapture(event.pointerId);
               if (!drag.active) return;
+              let completedDrop = false;
               const target = document
                 .elementFromPoint(event.clientX, event.clientY)
                 ?.closest<HTMLElement>("[data-tab-id], [data-lotus-drop]");
@@ -403,13 +403,16 @@ export function TitleBar({
                     },
                   ),
                 );
+                completedDrop = true;
                 setInsert(null);
-                releaseSuppressedTabClick(drag.id);
+                if (completedDrop) releaseSuppressedTabClick(drag.id);
                 return;
               }
               if (target?.dataset.pinned) {
                 setInsert(null);
-                releaseSuppressedTabClick(drag.id);
+                // Returning a dragged temporary tab to itself is still a tab
+                // selection, not a completed reorder. Let its click through.
+                suppressTabClick.current = null;
                 return;
               }
               const targetId = Number(target?.dataset.tabId);
@@ -420,11 +423,13 @@ export function TitleBar({
                   targetId,
                   event.clientX < rect.left + rect.width / 2
                     ? "before"
-                    : "after",
+                  : "after",
                 );
+                completedDrop = true;
               }
               setInsert(null);
-              releaseSuppressedTabClick(drag.id);
+              if (completedDrop) releaseSuppressedTabClick(drag.id);
+              else suppressTabClick.current = null;
             }}
             onDragOver={(event) => {
               if (
@@ -491,13 +496,21 @@ export function TitleBar({
                 tab.browser?.url ??
                 (tab.pinned ? "Current note" : "Organize workspace")
               }
+              onPointerDown={(event) => {
+                // On the undecorated Windows titlebar, a real mouse release
+                // can be claimed by the native drag surface before it becomes
+                // a DOM click. Select before the surrounding tab container
+                // starts tracking a possible reorder. Keyboard activation is
+                // still handled by the click fallback below.
+                if (event.button === 0) selectTab(tab.id);
+              }}
               onClick={(event) => {
                 if (suppressTabClick.current === tab.id) {
                   event.preventDefault();
                   suppressTabClick.current = null;
                   return;
                 }
-                selectTab(tab.id);
+                if (event.detail === 0) selectTab(tab.id);
               }}
               onKeyDown={(event) => {
                 if (

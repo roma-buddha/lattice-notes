@@ -2,6 +2,16 @@
 
 This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
+## 0.14.13 — 2026-09-14 — Browser-and-note split workspace
+
+- Fixed temporary tab selection on the Windows undecorated titlebar. Native drag handling could consume a real mouse-release before it became a DOM click, leaving the old note visible. A primary pointer-down now selects the tab before optional drag tracking begins, while keyboard tab activation remains supported.
+- Added browser-aware splitting. When **Side by side** or **Top and bottom** is chosen with a browser tab active, Lotus moves that same native WebView2 session into the second pane and restores the underlying note as the editable first pane. Browser navigation and the page session remain intact while the split direction changes.
+- Extended the isolated native browser smoke test to cover real tab clicks with minor pointer movement, deterministic tab reordering, browser-plus-note side-by-side, and browser-plus-note top-and-bottom layouts.
+
+**Compatibility:** no vault, note, draft, browser-profile, organizer, or AI-connection migration is required.
+
+**Verification:** TypeScript production build, frontend lint, 35 frontend tests, 28 native Rust tests, and the isolated native browser/tab/split smoke test passed.
+
 ## 0.14.12 — 2026-09-14 — Reliable browser overlays and tab switching
 
 - Fixed the native browser child turning Lotus into a multi-WebView host while normal workspace commands still expected a single-webview window. Vault selection, note/view bookkeeping, drag targets, detached notes, and AI request/download controls now address their host window safely while a browser tab is open; the misleading **current webview is not a WebviewWindow** error no longer appears.

@@ -96,6 +96,28 @@ try {
     "Browser tab did not navigate inside its WebView",
   );
 
+  // An active browser tab must split with the retained note rather than
+  // replacing the split layout. The native WebView moves into pane two.
+  await page.getByRole("button", { name: "Split view", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Side by side", exact: true }).click();
+  await until(
+    async () =>
+      (await page.locator(".editor-panes.split-right").count()) === 1 &&
+      (await page
+        .locator('[aria-label="Second note pane"] [aria-label="Browser"]')
+        .count()) === 1,
+    "Splitting an active browser tab did not place it beside the note",
+  );
+  assert.equal(await page.locator(".note-title").inputValue(), "Alpha");
+  await page.getByRole("button", { name: "Split view", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Top and bottom", exact: true }).click();
+  await until(
+    async () => (await page.locator(".editor-panes.split-down").count()) === 1,
+    "The browser split did not change to top and bottom",
+  );
+  await page.getByRole("button", { name: "Split view", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Close split", exact: true }).click();
+
   await page
     .locator('.tree-row[data-path="Work/Notes/Beta.md"] .tree-select')
     .click();
@@ -169,10 +191,18 @@ try {
     async () => (await page.locator(".note-title").inputValue()) === "Beta",
     "Selecting Beta did not replace Alpha in the editor",
   );
-  await alphaTab.click();
+  // Small pointer movement inside a temporary tab must still select it rather
+  // than being mistaken for a completed reorder.
+  const alphaBounds = await alphaTab.boundingBox();
+  assert.ok(alphaBounds, "Alpha tab bounds were not available for selection");
+  await page.mouse.move(alphaBounds.x + alphaBounds.width / 2, alphaBounds.y + alphaBounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(alphaBounds.x + alphaBounds.width / 2 + 9, alphaBounds.y + alphaBounds.height / 2, { steps: 2 });
+  await page.mouse.move(alphaBounds.x + alphaBounds.width / 2, alphaBounds.y + alphaBounds.height / 2, { steps: 2 });
+  await page.mouse.up();
   await until(
     async () => (await page.locator(".note-title").inputValue()) === "Alpha",
-    "Selecting Alpha did not replace Beta in the editor",
+    "A temporary tab with pointer jitter did not replace Beta in the editor",
   );
   const dragTab = async (from, to, fraction) => {
     const source = await from.boundingBox();

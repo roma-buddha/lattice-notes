@@ -804,6 +804,34 @@ export default function App() {
   };
   const startSplit = async (direction: "right" | "down") => {
     if (!(await saveAll())) return;
+    const activeBrowser = tabsRef.current.find(
+      (tab) => tab.id === activeTabRef.current,
+    )?.browser;
+    if (activeBrowser) {
+      // A browser is a native child WebView, not a document. It cannot be
+      // rendered in the primary editor branch and split at the same time.
+      // Move that exact WebView into the existing secondary-browser slot and
+      // restore the note it was opened over as the editable primary pane.
+      const primary = current.current.doc;
+      if (!primary) {
+        setError("Open a note before splitting a browser tab.");
+        return;
+      }
+      const primaryTab = tabsRef.current.find(
+        (tab) => tab.path === primary.path,
+      );
+      if (!primaryTab) {
+        setError("The note behind this browser tab is no longer open.");
+        return;
+      }
+      setSecondaryBrowser(activeBrowser);
+      activeTabRef.current = primaryTab.id;
+      setActiveTab(primaryTab.id);
+      setActivePane("primary");
+      setSplitRatio(50);
+      setSplitView(direction);
+      return;
+    }
     if (!secondaryRef.current.doc && current.current.doc) {
       secondaryRef.current = {
         doc: current.current.doc,
