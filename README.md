@@ -57,7 +57,7 @@ Permanent deletion requires confirmation. Restore never overwrites an existing p
 
 ## Editing and recovery
 
-Changes save every second, including during continuous typing. Saves also flush before navigation, locking, detaching or closing. There is no Save button; a small status icon beside the note lock shows pending, error, or confirmed saved (green).
+Changes save after a short pause in typing, with a five-second safety flush during continuous edits. Recovery drafts are recorded on every change, and saves also flush before navigation, locking, detaching or closing. There is no Save button; a small status icon beside the note lock shows pending, error, or confirmed saved (green).
 
 **Unlocked** allows editing. **Locked** shows a read-only Markdown view; the backend also rejects writes to locked notes. Lock state persists across restarts and is shared between windows. This is an application editing lock, not filesystem encryption or an OS permission.
 
@@ -77,11 +77,11 @@ The sidebar shows Files and New folder at the top, and the full wrapping vault n
 
 ## Workspace organizer and areas
 
-Use the **Organize workspace icon** in the sidebar navigation row, for a closable main-area tab containing every vault, folder and note. The tree starts collapsed, with Expand all/Collapse all controls. Drag a note into a folder, including one in another vault. Moves never overwrite a destination. **Undo last move** is available while this organizer view stays open; it also refuses collisions.
+Use the **Organize workspace icon** in the sidebar navigation row for a closable main-area tab containing every vault, folder and note. The tree starts collapsed, with one state-aware Expand all/Collapse all control. Vaults are visually grouped under their Areas; **Uncategorized** appears last when it contains vaults. Drag a note into a folder, including one in another vault. Moves never overwrite a destination. **Undo last move** is available while this organizer view stays open; it also refuses collisions.
 
 Create, rename and choose icons for life **Areas**, then choose an area while creating or adding each vault. Unassigned vaults appear in **Uncategorized**. Areas are labels in `.lotus-state/organizer.json`, not another directory level. Removing an area only removes its label and puts its vaults back in Uncategorized. Vault settings show the current area's icon/name and allow reassignment, including Uncategorized, without moving files. Area edits use revisions to prevent overwriting changes from another window.
 
-Vault action menus contain Create folder, Create note, Convert to folder and Vault settings, in that order. Rename and Trash are inside Vault settings. Organizer has a Create vault button and its search field above the Files heading on the left. Folder menus retain their creation, rename and Trash actions. Conversion requires a destination and a preview of every new path; source folder names become filename prefixes to retain Vault → Folder → Note. Filename collisions and stale previews are rejected. Copies are verified, and the original vault is retained in internal Trash. Empty folders are not reproduced as nested folders. Notes, bookmark paths, locks and appearance preferences follow the conversion; links inside Markdown are not rewritten.
+Vault action menus contain Create folder, Create note, Convert to folder and Vault settings, in that order. Rename and Trash are inside Vault settings. Organizer has a Create vault button and its search field above the Area groups on the left. Folder menus retain their creation, rename and Trash actions. Conversion requires a destination and a preview of every new path; source folder names become filename prefixes to retain Vault → Folder → Note. Filename collisions and stale previews are rejected. Copies are verified, and the original vault is retained in internal Trash. Empty folders are not reproduced as nested folders. Notes, bookmark paths, locks and appearance preferences follow the conversion; links inside Markdown are not rewritten.
 
 ## Menus, links and bookmarks
 
@@ -99,7 +99,9 @@ Fenced `mermaid` blocks render locally as diagrams in both views. Controls provi
 
 ## Tabs and windows
 
-Click a sidebar note or drag it into the top bar to open a tab; an already-open note is selected instead of duplicated. Every tab can close, including the first. Press **Ctrl+Shift+W** to close all tabs; **Ctrl+W** closes the active tab. With zero tabs, the main canvas is completely blank. Tabs can be reordered by dragging; arrow keys navigate the focused tab strip. Tabs have only a close button, no three-dot menu. All unused top-bar space is a native window-drag region.
+Click a sidebar or search-result note to replace the anchored first **Current note** tab. It remains available for the next note and cannot be closed independently. Use a note’s **Open in new tab** menu action or drag a note to the tab bar for an independent tab. Right-click a tab for **Close additional tabs**, which keeps the note currently being read in Current note and removes temporary note, browser, Organizer, and release-history tabs. Press **Ctrl+Shift+W** to close all tabs; **Ctrl+W** closes the active temporary tab. Tabs can be reordered by dragging; arrow keys navigate the focused tab strip. All unused top-bar space is a native window-drag region.
+
+The globe beside Settings opens a built-in browser as an ordinary Lotus tab. It has an address field and Back, Forward, and Reload controls. Browser tabs can be reordered, closed, or dropped onto either split-pane header just like note tabs. Web content runs in an isolated native WebView2 child view and can only navigate to normal HTTP(S) addresses.
 
 Use the top **Split view** icon or a tab’s right-click menu for side-by-side or top-and-bottom panes. Focus a pane, then click a sidebar note to open it there, or drag a sidebar note or an open top tab onto either pane’s header to replace only that pane. Resize the divider by dragging (or its arrow keys), and close either pane with its X. Both directions start at 50/50 and contain matching independent headers, editable titles, Properties, bookmarks, appearance controls and content. Both panes autosave before closing; two views of the same note share edits.
 
@@ -130,7 +132,7 @@ npm run smoke
 
 The NSIS installer is built in `src-tauri/target/release/bundle/nsis/`. Builds are unsigned.
 
-The previous regression suite (`scripts/smoke-lotus-0100.mjs`) uses a temporary workspace, WebView profile and loopback debug port. It verifies real mouse selection, hidden formatting/toggles, toolbar and table undo, inline Properties/YAML, table and column resizing, overflow behavior, Mermaid rendering/editing/labels, actual sidebar/tab drops into both split orientations, inline creation, link-dialog layout, adjacent vault settings/rename, left-navigation Settings and narrow-window layouts. Historical suites retain earlier table-selection, resizing, conversion and Organizer-scroll coverage. Set `NOTUS_EXECUTABLE` to test an installed build. `NOTUS_ROOT` bypasses single-instance handling for isolated tests; normal shortcuts set neither test environment variables nor debug ports.
+The regression suite (`scripts/smoke-lotus-0120.mjs`) uses a temporary workspace, WebView profile and loopback debug port. It verifies real mouse selection, hidden formatting/toggles, toolbar and table undo, inline Properties/YAML, table and column resizing, overflow behavior, Mermaid rendering/editing/labels, anchored Current note navigation, closing temporary tabs, grouped Organizer Areas, actual sidebar/tab drops into both split orientations, inline creation, link-dialog layout, adjacent vault settings/rename, left-navigation Settings and narrow-window layouts. Set `NOTUS_EXECUTABLE` to test an installed build. `NOTUS_ROOT` bypasses single-instance handling for isolated tests; normal shortcuts set neither test environment variables nor debug ports.
 
 Physical cross-monitor tab tear-off requires a manual desktop check: the available desktop automation restricts drag endpoints to the source window. Detached native windows and the menu-based round trip are covered automatically.
 

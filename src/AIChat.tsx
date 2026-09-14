@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, Send, Square, Settings2, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Send, Settings2, Sparkles, Square, Trash2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -8,10 +8,21 @@ import {
   type Connection,
   type Message,
   type NoteContext,
-  type Provider,
 } from "./ai";
 import { api, stem } from "./notus";
 type Proposal = { note: NoteContext; replacement: string };
+const compactModel = (connection: Connection) => {
+  const local = connection.source === "local";
+  const fallback = connection.model
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .at(-1)
+    ?.replace(/\.gguf$/i, "") || "Local model";
+  const model = local
+    ? (connection.name?.replace(/^Lotus local runtime\s*·\s*/i, "") || fallback)
+    : connection.model;
+  return { provider: local ? "Local" : connectionName(connection), model };
+};
 export function AIChat({
   open,
   close,
@@ -28,12 +39,13 @@ export function AIChat({
   apply: (note: NoteContext, replacement: string) => Promise<void>;
 }) {
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [provider, setProvider] = useState<Provider>("openrouter");
+  const [connectionId, setConnectionId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [context, setContext] = useState<"none" | "note" | "selection">("none");
   const [mode, setMode] = useState<"chat" | "edit">("chat");
   const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState("");
@@ -43,6 +55,9 @@ export function AIChat({
   const generation = useRef(0);
   const conversation = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const modelPicker = useRef<HTMLDivElement>(null);
+  const modelTrigger = useRef<HTMLButtonElement>(null);
+  const modelOptions = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => {
     const requestGeneration = generation;
     const load = () => {
@@ -50,10 +65,10 @@ export function AIChat({
         .connections()
         .then((list) => {
           setConnections(list);
-          setProvider((p) =>
-            list.some((c) => c.provider === p)
-              ? p
-              : (list[0]?.provider ?? "openrouter"),
+          setConnectionId((current) =>
+            list.some((c) => c.id === current)
+              ? current
+              : (list[0]?.id ?? ""),
           );
         })
         .catch((e) => setError(String(e)));
@@ -79,6 +94,15 @@ export function AIChat({
   useEffect(() => {
     conversation.current?.scrollTo({ top: conversation.current.scrollHeight });
   }, [messages, proposal, busy]);
+  useEffect(() => {
+    const closeWhenClickedOutside = (event: PointerEvent) => {
+      if (!modelPicker.current?.contains(event.target as Node))
+        setModelPickerOpen(false);
+    };
+    if (modelPickerOpen)
+      window.addEventListener("pointerdown", closeWhenClickedOutside);
+    return () => window.removeEventListener("pointerdown", closeWhenClickedOutside);
+  }, [modelPickerOpen]);
   const stop = () => {
     generation.current++;
     void ai.stop().catch((e) => setError(String(e)));
@@ -93,6 +117,18 @@ export function AIChat({
     setStatus("");
     setInput("");
     requestAnimationFrame(() => composer.current?.focus());
+  };
+  const selectModel = (nextId: string) => {
+    setConnectionId(nextId);
+    setModelPickerOpen(false);
+    setMessages([]);
+    setProposal(null);
+    setStatus("New conversation for the selected model.");
+    requestAnimationFrame(() => modelTrigger.current?.focus());
+  };
+  const focusModelOption = (index: number) => {
+    const next = (index + connections.length) % connections.length;
+    modelOptions.current[next]?.focus();
   };
   const send = async () => {
     if (!input.trim() || busy || applying || !connections.length)
@@ -134,7 +170,7 @@ export function AIChat({
     setInput("");
     try {
       const reply = await ai.chat(
-        provider,
+        connectionId,
         next,
         attached ? attached.body.slice(attached.from, attached.to) : null,
         mode === "edit",
@@ -150,6 +186,7 @@ export function AIChat({
       if (id !== generation.current) setStatus("Stopped. No note was changed.");
     }
   };
+  const selectedModel = connections.find((connection) => connection.id === connectionId) ?? connections[0];
   return (
     <aside
       hidden={!open}
@@ -207,7 +244,10 @@ export function AIChat({
           title="Assistant options"
           aria-expanded={configurationOpen}
           disabled={busy || applying}
-          onClick={() => setConfigurationOpen((open) => !open)}
+          onClick={() => setConfigurationOpen((open) => {
+            if (open) setModelPickerOpen(false);
+            return !open;
+          })}
         >
           <Settings2 size={17} />
         </button>
@@ -224,27 +264,69 @@ export function AIChat({
       </header>
       {configurationOpen && (
         <section className="ai-configuration" aria-label="Assistant options">
-          <label>
-            Model
-            <select
+          <div className="ai-model-picker" ref={modelPicker}>
+            <span className="ai-model-picker-label">Model</span>
+            <button
+              ref={modelTrigger}
+              type="button"
+              className="ai-model-trigger"
               aria-label="Chat model"
-              disabled={busy || applying}
-              value={connections.length ? provider : ""}
-              onChange={(e) => {
-                setProvider(e.target.value as Provider);
-                setMessages([]);
-                setProposal(null);
-                setStatus("New conversation for the selected provider.");
+              aria-haspopup="listbox"
+              aria-controls="ai-model-options"
+              aria-expanded={modelPickerOpen}
+              disabled={busy || applying || !connections.length}
+              onClick={() => setModelPickerOpen((open) => !open)}
+              onKeyDown={(event) => {
+                if (!connections.length) return;
+                if (event.key === "Escape" && modelPickerOpen) {
+                  event.preventDefault();
+                  setModelPickerOpen(false);
+                } else if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+                  event.preventDefault();
+                  setModelPickerOpen(true);
+                  requestAnimationFrame(() => focusModelOption(connections.findIndex((c) => c.id === connectionId)));
+                }
               }}
             >
-              {!connections.length && <option value="">No model connected</option>}
-              {connections.map((c) => (
-                <option key={c.provider} value={c.provider}>
-                  {connectionName(c)} · {c.model}
-                </option>
-              ))}
-            </select>
-          </label>
+              {selectedModel ? <span className="ai-model-summary"><strong>{compactModel(selectedModel).provider}</strong><span>{compactModel(selectedModel).model}</span></span> : <span>No model connected</span>}
+              <ChevronDown size={16} aria-hidden="true" />
+            </button>
+            {modelPickerOpen && <div id="ai-model-options" className="ai-model-options" role="listbox" aria-label="Chat model">
+              {connections.map((connection, index) => {
+                const label = compactModel(connection);
+                const selected = connection.id === connectionId;
+                return <button
+                  key={connection.id}
+                  ref={(element) => { modelOptions.current[index] = element; }}
+                  type="button"
+                  className="ai-model-option"
+                  role="option"
+                  aria-selected={selected}
+                  title={`${label.provider} · ${label.model}`}
+                  onClick={() => selectModel(connection.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setModelPickerOpen(false);
+                      modelTrigger.current?.focus();
+                    } else if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      focusModelOption(index + 1);
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      focusModelOption(index - 1);
+                    } else if (event.key === "Home") {
+                      event.preventDefault();
+                      focusModelOption(0);
+                    } else if (event.key === "End") {
+                      event.preventDefault();
+                      focusModelOption(connections.length - 1);
+                    }
+                  }}
+                ><span><strong>{label.provider}</strong><small>{label.model}</small></span>{selected && <Check size={16} aria-label="Selected" />}</button>;
+              })}
+            </div>}
+          </div>
           <div className="ai-configuration-row">
             <label>
               Context

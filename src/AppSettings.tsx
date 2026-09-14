@@ -176,7 +176,7 @@ export function AppSettings({
               <h4>Project</h4>
               <p>Lotus is an educational project by VISTU LAB.</p>
               <h4>License</h4>
-              <p>© 2026 Lattice Notes contributors. Lotus is licensed under the MIT License.</p>
+              <p>© 2026 VISTU LAB. Lotus is licensed under the MIT License.</p>
               <p className="muted">You may use, copy, modify, publish, distribute, sublicense, and sell copies of Lotus, provided its copyright and MIT license notice are retained. It is provided without warranty. See the bundled LICENSE file for the complete terms.</p>
               <h4>Release</h4>
               <p>Lotus {release.version}</p>

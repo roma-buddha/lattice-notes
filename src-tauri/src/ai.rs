@@ -7,13 +7,24 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Mutex, OnceLock},
-    time::Duration,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Emitter, Manager};
 
-#[derive(Serialize, Deserialize)]
+const PROVIDERS: [&str; 6] = ["openrouter", "google", "nvidia", "custom", "lotus", "local"];
+const CONNECTION_STORE: &str = "connections.v2";
+static CONNECTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Serialize, Deserialize, Clone)]
 struct Secret {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    provider: String,
     key: String,
     model: String,
     #[serde(default)]
@@ -23,8 +34,13 @@ struct Secret {
     #[serde(default)]
     runtime_path: String,
 }
+#[derive(Serialize, Deserialize, Default)]
+struct SecretStore {
+    connections: Vec<Secret>,
+}
 #[derive(Serialize)]
 pub struct Connection {
+    id: String,
     provider: String,
     model: String,
     name: String,
@@ -118,6 +134,74 @@ fn entry(provider: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new("app.lotus.ai", provider)
         .map_err(|_| "Windows credential storage is unavailable.".into())
 }
+fn connection_store_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("app.lotus.ai", CONNECTION_STORE)
+        .map_err(|_| "Windows credential storage is unavailable.".into())
+}
+fn new_connection_id(provider: &str) -> String {
+    let sequence = CONNECTION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{provider}-{now:x}-{sequence:x}")
+}
+fn save_connections(connections: &[Secret]) -> Result<(), String> {
+    connection_store_entry()?
+        .set_password(
+            &serde_json::to_string(&SecretStore {
+                connections: connections.to_vec(),
+            })
+            .map_err(|_| "Cannot save connections.")?,
+        )
+        .map_err(|_| {
+            "Could not save the AI connections securely. Nothing was saved to disk.".into()
+        })
+}
+/// Move pre-0.14.10 provider-only credentials into the connection collection.
+/// The old entries remain intact until the new secure value was written.
+fn saved_connections() -> Result<Vec<Secret>, String> {
+    match connection_store_entry()?.get_password() {
+        Ok(raw) => {
+            let mut store: SecretStore = serde_json::from_str(&raw).map_err(|_| {
+                "Saved AI connections are invalid. Please save the connection again.".to_string()
+            })?;
+            let mut changed = false;
+            for connection in &mut store.connections {
+                if connection.id.is_empty() {
+                    connection.id = new_connection_id(&connection.provider);
+                    changed = true;
+                }
+            }
+            if changed {
+                save_connections(&store.connections)?;
+            }
+            Ok(store.connections)
+        }
+        Err(keyring::Error::NoEntry) => {
+            let mut connections = Vec::new();
+            for provider in PROVIDERS {
+                match entry(provider)?.get_password() {
+                    Ok(raw) => {
+                        let mut connection: Secret = serde_json::from_str(&raw)
+                            .map_err(|_| "Saved AI connection is invalid.")?;
+                        connection.id = new_connection_id(provider);
+                        connection.provider = provider.into();
+                        connections.push(connection);
+                    }
+                    Err(keyring::Error::NoEntry) => {}
+                    Err(_) => return Err("Cannot read Windows credential storage.".into()),
+                }
+            }
+            save_connections(&connections)?;
+            for provider in PROVIDERS {
+                let _ = entry(provider)?.delete_credential();
+            }
+            Ok(connections)
+        }
+        Err(_) => Err("Cannot read Windows credential storage.".into()),
+    }
+}
 fn endpoint(provider: &str, custom: &str) -> Result<String, String> {
     if provider == "lotus" {
         return Ok("http://127.0.0.1:8081/v1".into());
@@ -184,17 +268,24 @@ fn connection_key(provider: &str, key: &str, destination: &str) -> Result<String
         }
         return Ok(value.into());
     }
-    let saved = secret(provider)?;
+    let saved = saved_connections()?
+        .into_iter()
+        .rev()
+        .find(|connection| connection.provider == provider)
+        .ok_or_else(|| "Add an API key in Settings → AI models.".to_string())?;
     if provider == "custom" && endpoint(provider, &saved.base_url)? != destination {
         return Err("Enter the API key again when changing the custom endpoint. The saved key will not be sent to a different address.".into());
     }
     Ok(saved.key)
 }
-fn secret(provider: &str) -> Result<Secret, String> {
-    let raw = entry(provider)?
-        .get_password()
-        .map_err(|_| "Add an API key in Settings → AI models.".to_string())?;
-    serde_json::from_str(&raw).map_err(|_| "Please save this connection again.".into())
+fn secret(connection_id: &str) -> Result<Secret, String> {
+    saved_connections()?
+        .into_iter()
+        .find(|connection| connection.id == connection_id)
+        .ok_or_else(|| {
+            "The selected AI model is no longer connected. Choose another model in Assistant."
+                .into()
+        })
 }
 fn client() -> Result<reqwest::Client, String> {
     client_with_timeout(Duration::from_secs(90))
@@ -266,33 +357,27 @@ async fn models(provider: &str, key: &str, destination: &str) -> Result<Vec<Stri
 }
 #[tauri::command]
 pub fn ai_connections() -> Result<Vec<Connection>, String> {
-    let mut result = Vec::new();
     // Groq is no longer a Lotus provider. Remove its old credential once so it
     // cannot accidentally reappear or be used by a migrated installation.
     let _ = keyring::Entry::new("app.lotus.ai", "groq").and_then(|entry| entry.delete_credential());
-    for provider in ["openrouter", "google", "nvidia", "custom", "lotus", "local"] {
-        match entry(provider)?.get_password() {
-            Ok(raw) => {
-                let value: Secret =
-                    serde_json::from_str(&raw).map_err(|_| "Saved AI connection is invalid.")?;
-                result.push(Connection {
-                    provider: provider.into(),
-                    model: value.model,
-                    name: value.name,
-                    base_url: endpoint(provider, &value.base_url)?,
-                    source: if ["local", "lotus"].contains(&provider) {
-                        "local"
-                    } else {
-                        "api"
-                    }
-                    .into(),
-                });
-            }
-            Err(keyring::Error::NoEntry) => {}
-            Err(_) => return Err("Cannot read Windows credential storage.".into()),
-        }
-    }
-    Ok(result)
+    saved_connections()?
+        .into_iter()
+        .map(|value| {
+            Ok(Connection {
+                id: value.id,
+                provider: value.provider.clone(),
+                model: value.model,
+                name: value.name,
+                base_url: endpoint(&value.provider, &value.base_url)?,
+                source: if ["local", "lotus"].contains(&value.provider.as_str()) {
+                    "local"
+                } else {
+                    "api"
+                }
+                .into(),
+            })
+        })
+        .collect()
 }
 /// Start a GGUF in the Lotus-managed llama.cpp-compatible local runtime.
 #[tauri::command]
@@ -376,18 +461,17 @@ pub async fn ai_run_lotus(app: tauri::AppHandle, path: String) -> Result<String,
                 .and_then(|value| value.to_str())
                 .unwrap_or("Local GGUF")
                 .to_string();
-            entry("lotus")?
-                .set_password(
-                    &serde_json::to_string(&Secret {
-                        key: String::new(),
-                        model,
-                        name: format!("Lotus local runtime · {display}"),
-                        base_url: destination,
-                        runtime_path: file.to_string_lossy().to_string(),
-                    })
-                    .map_err(|_| "Cannot save local runtime connection.")?,
-                )
-                .map_err(|_| "Could not save the local runtime connection.")?;
+            let mut connections = saved_connections()?;
+            connections.push(Secret {
+                id: new_connection_id("lotus"),
+                provider: "lotus".into(),
+                key: String::new(),
+                model,
+                name: format!("Lotus local runtime · {display}"),
+                base_url: destination,
+                runtime_path: file.to_string_lossy().to_string(),
+            });
+            save_connections(&connections)?;
             return Ok(display);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -432,7 +516,9 @@ pub fn ai_stop_lotus() -> Result<(), String> {
     {
         let _ = child.kill();
     }
-    let _ = entry("lotus")?.delete_credential();
+    let mut connections = saved_connections()?;
+    connections.retain(|connection| connection.provider != "lotus");
+    save_connections(&connections)?;
     Ok(())
 }
 fn valid_hf_repository(value: &str) -> bool {
@@ -1009,25 +1095,27 @@ pub async fn ai_save(
         None,
     )
     .await?;
-    entry(&provider)?
-        .set_password(
-            &serde_json::to_string(&Secret {
-                key,
-                model,
-                name,
-                base_url: destination,
-                runtime_path: String::new(),
-            })
-            .map_err(|_| "Cannot save connection.")?,
-        )
-        .map_err(|_| "Could not save the API key securely. Nothing was saved to disk.".into())
+    let mut connections = saved_connections()?;
+    connections.push(Secret {
+        id: new_connection_id(&provider),
+        provider,
+        key,
+        model,
+        name,
+        base_url: destination,
+        runtime_path: String::new(),
+    });
+    save_connections(&connections)
 }
 #[tauri::command]
-pub fn ai_remove(provider: String) -> Result<(), String> {
-    match entry(&provider)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(_) => Err("Could not remove the saved key.".into()),
+pub fn ai_remove(connection_id: String) -> Result<(), String> {
+    let mut connections = saved_connections()?;
+    let count = connections.len();
+    connections.retain(|connection| connection.id != connection_id);
+    if connections.len() == count {
+        return Err("The selected AI model is no longer connected.".into());
     }
+    save_connections(&connections)
 }
 fn validate(messages: &[Message], context: Option<&str>, edit: bool) -> Result<(), String> {
     if messages.is_empty()
@@ -1225,12 +1313,13 @@ async fn summarize_local(
 pub async fn ai_chat(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
-    provider: String,
+    connection_id: String,
     messages: Vec<Message>,
     context: Option<String>,
     edit: bool,
 ) -> Result<Reply, String> {
-    let saved = secret(&provider)?;
+    let saved = secret(&connection_id)?;
+    let provider = saved.provider.clone();
     let destination = endpoint(&provider, &saved.base_url)?;
     // Repair existing Lotus connections made before the runtime's model-ID
     // contract was understood. This also handles an orphaned local runtime
@@ -1323,6 +1412,19 @@ mod tests {
             endpoint("openrouter", &value.base_url).unwrap(),
             base("openrouter").unwrap()
         );
+    }
+    #[test]
+    fn connection_store_keeps_multiple_models_from_the_same_provider() {
+        let store: SecretStore = serde_json::from_str(
+            r#"{"connections":[{"id":"openrouter-one","provider":"openrouter","key":"key","model":"model-one"},{"id":"openrouter-two","provider":"openrouter","key":"key","model":"model-two"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(store.connections.len(), 2);
+        assert_ne!(store.connections[0].id, store.connections[1].id);
+        assert!(store
+            .connections
+            .iter()
+            .all(|connection| connection.provider == "openrouter"));
     }
     #[test]
     fn request_limits_do_not_silently_truncate() {

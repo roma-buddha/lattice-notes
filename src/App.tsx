@@ -1,17 +1,9 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import CodeMirror from "@uiw/react-codemirror";
-import {
-  insertNewlineContinueMarkup,
-  markdown,
-} from "@codemirror/lang-markdown";
-import { codeAlignment } from "./codeAlignment";
-import { diagramEditing, noteIdentity } from "./diagramEditing";
 import { externalEditorUpdate } from "./externalEditorUpdate";
 import { externalMoves } from "./core/fileChanges";
 import { websiteUrl } from "./core/links";
-import { livePreview } from "./livePreview";
-import { EditorView, keymap } from "@codemirror/view";
-import { undo, undoDepth, indentWithTab } from "@codemirror/commands";
+import type { EditorView } from "@codemirror/view";
+import { undo, undoDepth } from "@codemirror/commands";
 import { exportSettings, importSettings } from "./portableSettings";
 import { AreaIcon } from "./AreaIcons";
 import { NoteSearch } from "./NoteSearch";
@@ -19,12 +11,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen, emitTo } from "@tauri-apps/api/event";
 import { AIChat } from "./AIChat";
 import { editedBody, minimalChange, preserveNotePosition, type NoteContext } from "./ai";
-import {
-  tableEditing,
-  tableHighlights,
-  tableColumnWidths,
-  type TableActionRequest,
-} from "./TableEditor";
+import { type TableActionRequest } from "./TableEditor";
 import { useNoteAppearance, moveNoteAppearance } from "./noteAppearance";
 import { serializeTable, findTables } from "./core/tables";
 import { VaultSetup } from "./VaultSetup";
@@ -67,6 +54,7 @@ import { NoteHeader } from "./NoteHeader";
 import { ContextMenu } from "./ContextMenu";
 import { BrowserPane, closeBrowserSession } from "./BrowserPane";
 import type { BrowserSession } from "./browserSession";
+import type { NoteEditorAppearance } from "./NoteEditor";
 
 // These panels are useful, but they should not delay the first usable Lotus window.
 const MarkdownView = lazy(() =>
@@ -78,42 +66,17 @@ const AppSettings = lazy(() =>
 const WorkspaceOrganizer = lazy(() =>
   import("./WorkspaceOrganizer").then((module) => ({ default: module.WorkspaceOrganizer })),
 );
+const NoteEditor = lazy(() =>
+  import("./NoteEditor").then((module) => ({ default: module.NoteEditor })),
+);
 import { editorItems } from "./EditorMenu";
 import {
   codeTarget,
   readTarget,
-  wrapTarget,
   type EditTarget,
 } from "./editTarget";
 import { useBookmarks, moveBookmarks } from "./bookmarks";
 
-const extensions = [
-  markdown(),
-  keymap.of([
-    { key: "Enter", run: insertNewlineContinueMarkup },
-    {
-      key: "Mod-b",
-      run: (view) => {
-        wrapTarget(codeTarget(view), "**");
-        return true;
-      },
-    },
-    {
-      key: "Mod-i",
-      run: (view) => {
-        wrapTarget(codeTarget(view), "*");
-        return true;
-      },
-    },
-    indentWithTab,
-  ]),
-  codeAlignment,
-  tableEditing,
-  diagramEditing,
-  livePreview,
-  EditorView.lineWrapping,
-  EditorView.contentAttributes.of({ "aria-label": "Note editor" }),
-];
 type DialogState = { kind: "delete"; entry: Entry };
 type ActionMenu = { entry: Entry; anchor: Anchor; settings?: boolean };
 const storage = {
@@ -229,15 +192,6 @@ export default function App() {
     snapshot.root,
     doc?.path ?? "",
   );
-  const noteExtensions = useMemo(
-    () => [
-      ...extensions,
-      noteIdentity.of(`${snapshot.root}:${doc?.path}`),
-      tableHighlights.of(appearance.highlights),
-      tableColumnWidths.of(appearance.widths),
-    ],
-    [appearance.highlights, appearance.widths, snapshot.root, doc?.path],
-  );
   const [tableActions, setTableActions] = useState<TableActionRequest | null>(
     null,
   );
@@ -319,20 +273,6 @@ export default function App() {
   const [secondaryAppearance, setSecondaryAppearance] = useNoteAppearance(
     snapshot.root,
     secondaryDoc?.path ?? "",
-  );
-  const secondaryExtensions = useMemo(
-    () => [
-      ...extensions,
-      noteIdentity.of(`${snapshot.root}:${secondaryDoc?.path}`),
-      tableHighlights.of(secondaryAppearance.highlights),
-      tableColumnWidths.of(secondaryAppearance.widths),
-    ],
-    [
-      secondaryAppearance.highlights,
-      secondaryAppearance.widths,
-      snapshot.root,
-      secondaryDoc?.path,
-    ],
   );
   const secondaryValue =
     secondaryDoc?.path === doc?.path ? draft : secondaryDraft;
@@ -668,14 +608,12 @@ export default function App() {
     void task().catch((e) => setError(String(e)));
   };
   const openNote = async (path: string) => {
-    if (activePane === "secondary" && splitView) {
-      await openSecondary(path);
-      return;
-    }
     if (navigating.current) return;
     navigating.current = true;
     try {
       if (!(await saveAll())) return;
+      // Sidebar and search navigation always replace the anchored first tab.
+      // The secondary pane changes only through its explicit header/drop actions.
       await openCurrentNote(path);
     } finally {
       navigating.current = false;
@@ -1053,11 +991,27 @@ export default function App() {
     storage.set("notus-sidebar-width", String(sidebarWidth));
   }, [sidebarWidth]);
   useEffect(() => {
-    // A fixed interval also saves during uninterrupted typing (not an idle debounce).
+    const primaryDirty = !!doc && doc.content !== draft;
+    const secondaryDirty =
+      !!secondaryDoc &&
+      secondaryDoc.path !== doc?.path &&
+      secondaryDoc.content !== secondaryDraft;
+    if (!primaryDirty && !secondaryDirty) return;
+    // Keep typing responsive: persistence happens after the writer pauses, while
+    // recovery drafts continue to be recorded on every edit.
+    const timer = window.setTimeout(() => {
+      if (!['Conflict', 'Save failed'].includes(live.current.status))
+        void live.current.save();
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [doc, draft, secondaryDoc, secondaryDraft]);
+  useEffect(() => {
+    // A slower safety flush still protects a continuously edited note without
+    // issuing a filesystem write for every second of active typing.
     const timer = setInterval(() => {
       if (!["Conflict", "Save failed"].includes(live.current.status))
         void live.current.save();
-    }, 1000);
+    }, 5000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
@@ -1482,6 +1436,33 @@ export default function App() {
     activeTabRef.current = detached ? 1 : 0;
     setActiveTab(detached ? 1 : 0);
     storage.remove(`notus-last:${current.current.root}`);
+  };
+  const closeAdditionalTabs = async () => {
+    if (!(await saveAll())) return;
+    // A temporary tab may be the one the user is reading. Promote its note
+    // into the anchored workspace before removing all temporary tabs.
+    const active = tabs.find((tab) => tab.id === activeTabRef.current);
+    const path = active?.path ?? current.current.doc?.path;
+    await Promise.all(
+      tabs.flatMap((tab) =>
+        !tab.pinned && tab.browser
+          ? [closeBrowserSession(tab.browser.id).catch(() => {})]
+          : [],
+      ),
+    );
+    setSecondaryBrowser(null);
+    await closeSplit();
+    setTabs((previous) => previous.filter((tab) => tab.pinned));
+    activeTabRef.current = 0;
+    setActiveTab(0);
+    setActivePane("primary");
+    if (!path) return;
+    const next = await api.read(path);
+    if (!next) return;
+    setVaultPath(path.split("/")[0]);
+    loadDocument(next);
+    setSelected(path);
+    setError("");
   };
   const openOrganizer = async () => {
     if (!(await saveAll())) return;
@@ -2318,7 +2299,7 @@ export default function App() {
               query.trim() ? (
                 <NoteSearch
                   query={query}
-                  open={(path) => run(() => openExtraTab(path, true))}
+                  open={(path) => run(() => openNote(path))}
                 />
               ) : (
                 <p className="muted search-empty">
@@ -2596,45 +2577,30 @@ export default function App() {
                       onChange={edit}
                     />
                     {!doc.locked ? (
-                      <CodeMirror
-                        key={doc.path}
-                        className="editor"
-                        onCreateEditor={(view) => {
-                          editorView.current = view;
-                          const saved =
-                            doc && viewPositions.current.get(doc.path);
-                          if (saved)
-                            view.dispatch({
-                              selection: {
-                                anchor: Math.min(
-                                  saved.anchor,
-                                  view.state.doc.length,
-                                ),
-                                head: Math.min(
-                                  saved.head,
-                                  view.state.doc.length,
-                                ),
-                              },
-                            });
-                        }}
-                        value={splitFrontmatter(draft).body}
-                        theme={theme}
-                        extensions={noteExtensions}
-                        onChange={(body) => {
-                          const parsed = splitFrontmatter(draft);
-                          edit(
-                            draft.slice(0, draft.length - parsed.body.length) +
-                              body,
-                          );
-                        }}
-                        basicSetup={{
-                          lineNumbers: false,
-                          foldGutter: false,
-                          highlightActiveLine: false,
-                          highlightActiveLineGutter: false,
-                          highlightSelectionMatches: false,
-                        }}
-                      />
+                      <Suspense fallback={<div className="reading-loading" aria-live="polite">Preparing editor…</div>}>
+                        <NoteEditor
+                          path={doc.path}
+                          value={splitFrontmatter(draft).body}
+                          theme={theme}
+                          identity={`${snapshot.root}:${doc.path}`}
+                          appearance={appearance as NoteEditorAppearance}
+                          onCreateEditor={(view) => {
+                            editorView.current = view;
+                            const saved = viewPositions.current.get(doc.path);
+                            if (saved)
+                              view.dispatch({
+                                selection: {
+                                  anchor: Math.min(saved.anchor, view.state.doc.length),
+                                  head: Math.min(saved.head, view.state.doc.length),
+                                },
+                              });
+                          }}
+                          onChange={(body) => {
+                            const parsed = splitFrontmatter(draft);
+                            edit(draft.slice(0, draft.length - parsed.body.length) + body);
+                          }}
+                        />
+                      </Suspense>
                     ) : (
                       <Suspense fallback={<div className="reading-loading" aria-live="polite">Preparing preview…</div>}><MarkdownView
                         content={splitFrontmatter(draft).body}
@@ -2837,37 +2803,25 @@ export default function App() {
                           onChange={editSecondary}
                         />
                         {!secondaryNote.locked ? (
-                          <CodeMirror
-                            key={secondaryNote.path}
-                            className="editor"
-                            onCreateEditor={(view) => {
-                              secondaryEditor.current = view;
-                            }}
-                            value={splitFrontmatter(secondaryValue).body}
-                            theme={theme}
-                            extensions={secondaryExtensions}
-                            onChange={(body) => {
-                              const value =
-                                secondaryRef.current.doc?.path ===
-                                current.current.doc?.path
+                          <Suspense fallback={<div className="reading-loading" aria-live="polite">Preparing editor…</div>}>
+                            <NoteEditor
+                              path={secondaryNote.path}
+                              value={splitFrontmatter(secondaryValue).body}
+                              theme={theme}
+                              identity={`${snapshot.root}:${secondaryNote.path}`}
+                              appearance={secondaryAppearance as NoteEditorAppearance}
+                              onCreateEditor={(view) => {
+                                secondaryEditor.current = view;
+                              }}
+                              onChange={(body) => {
+                                const value = secondaryRef.current.doc?.path === current.current.doc?.path
                                   ? current.current.draft
                                   : secondaryRef.current.draft;
-                              const parsed = splitFrontmatter(value);
-                              editSecondary(
-                                value.slice(
-                                  0,
-                                  value.length - parsed.body.length,
-                                ) + body,
-                              );
-                            }}
-                            basicSetup={{
-                              lineNumbers: false,
-                              foldGutter: false,
-                              highlightActiveLine: false,
-                              highlightActiveLineGutter: false,
-                              highlightSelectionMatches: false,
-                            }}
-                          />
+                                const parsed = splitFrontmatter(value);
+                                editSecondary(value.slice(0, value.length - parsed.body.length) + body);
+                              }}
+                            />
+                          </Suspense>
                         ) : (
                           <Suspense fallback={<div className="reading-loading" aria-live="polite">Preparing preview…</div>}><MarkdownView
                             content={splitFrontmatter(secondaryValue).body}
@@ -3181,6 +3135,7 @@ export default function App() {
               run: () => run(() => detachTab(tabMenu.id, false)),
             },
             { label: "Close tab", run: () => run(() => closeTab(tabMenu.id)) },
+            { label: "Close additional tabs", disabled: detached, run: () => run(closeAdditionalTabs) },
             { label: "Close all tabs", run: () => run(closeAll) },
           ]}
         />

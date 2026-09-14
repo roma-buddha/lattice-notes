@@ -122,11 +122,11 @@ try {
   });
   const searchBox = await org.getByLabel("Filter organizer").boundingBox(),
     heading = await org
-      .getByRole("heading", { name: "Files", exact: true })
+      .getByRole("heading", { name: "Uncategorized", exact: true })
       .boundingBox();
   assert.ok(
     searchBox.x <= heading.x + 2 && searchBox.y < heading.y,
-    "Organizer search above Files",
+    "Organizer search above its area groups",
   );
   await org.getByRole("button", { name: "Create vault", exact: true }).click();
   await page
@@ -134,6 +134,7 @@ try {
     .waitFor();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await org.getByRole("button", { name: "Expand all", exact: true }).click();
+  await org.getByRole("button", { name: "Collapse all", exact: true }).waitFor();
   await org
     .locator(".explorer-vault summary")
     .filter({ hasText: "Work" })
@@ -200,11 +201,17 @@ try {
       .inputValue(),
     "Other vault note",
   );
-  await page.getByRole("tab", { name: "Alpha", exact: true }).click();
   await nav.getByRole("button", { name: "Files", exact: true }).click();
   assert.ok(await page.locator('.tree-row[data-path="' + alpha + '"]').count());
+  assert.equal(await page.getByRole("tab", { name: "Current note", exact: true }).count(), 1);
+  await page.locator('.tree-row[data-path="' + alpha + '"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open in new tab", exact: true }).click();
+  await page.getByRole("tab", { name: "Alpha", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "Alpha", exact: true }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Close additional tabs", exact: true }).click();
+  await until(async () => (await page.getByRole("tab", { name: "Alpha", exact: true }).count()) === 0, "Additional tabs did not close");
   checks.push(
-    "Sidebar navigation, dedicated search, organizer search and vault menu/create",
+    "Sidebar navigation, anchored Current note, close-additional-tabs, organizer areas and vault menu/create",
   );
   const list = editor.locator(".cm-hanging-list").first();
   const positions = await list.evaluate((el) => {

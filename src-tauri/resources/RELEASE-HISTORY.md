@@ -2,6 +2,19 @@
 
 This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
+## 0.14.10 — 2026-09-14 — Faster startup and reliable workspace flow
+
+- Deferred native recursive workspace watching until after the Lotus window is ready. Cached workspace data and the lightweight startup snapshot can therefore reach the screen before watcher setup touches a large vault; normal create, rename, delete, and open-note reconciliation resumes immediately afterward.
+- Replaced the unconditional one-second filesystem write loop with a 700 ms idle save and a five-second continuous-edit safety flush. Recovery drafts remain recorded on each change, and all explicit transitions still wait for a successful save.
+- Moved the CodeMirror editing surface behind a lazy feature boundary and split editor/Markdown libraries into dedicated production chunks. The app shell, cached workspace tree, Settings, and Organizer no longer need to parse the full editing stack before becoming usable.
+- Made the AI settings panel fetch connected models and the model-library location first. Potentially slow local GGUF discovery and computer-specification detection now run only for Local and Hugging Face work, and independent requests execute in parallel.
+- Updated the Organizer regression suite for its single expand/collapse button and Area headings. It also verifies that sidebar/search navigation always reuses Current note, while manually opened temporary tabs can be removed with Close additional tabs.
+- Updated the built-in documentation to describe the anchored Current note, browser tabs, Area grouping, and idle autosave behavior. Added Windows CI for linting, frontend tests/build, and native Rust tests.
+
+**Compatibility:** no vault layout, organizer metadata, draft, browser, or AI-connection migration is required. Existing local model connections and workspaces continue unchanged.
+
+**Verification:** lint, TypeScript, frontend tests, Rust formatting/tests, production build, debug smoke test, and Windows NSIS package are required for this release.
+
 ## 0.14.9 — 2026-09-14 — Native in-app browser tabs
 
 - Added an **Open browser** globe button directly beside Settings in the top menu. It opens a normal Lotus tab with a DuckDuckGo start page, address field, Back, Forward, and Reload controls.

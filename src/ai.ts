@@ -10,6 +10,7 @@ export const providerNames: Record<Provider, string> = {
   local: "Local server",
 };
 export type Connection = {
+  id: string;
   provider: Provider;
   model: string;
   name?: string;
@@ -52,7 +53,7 @@ export const ai = {
     name = "",
     baseUrl = "",
   ) => invoke<void>("ai_save", { provider, key, model, name, baseUrl }),
-  remove: (provider: Provider) => invoke<void>("ai_remove", { provider }),
+  remove: (connectionId: string) => invoke<void>("ai_remove", { connectionId }),
   runLotus: (path: string) => invoke<string>("ai_run_lotus", { path }),
   stopLotus: () => invoke<void>("ai_stop_lotus"),
   computerSpecs: (refresh = false) => invoke<ComputerSpecs>("ai_computer_specs", { refresh }),
@@ -69,13 +70,13 @@ export const ai = {
   hfDownload: (repository: string, file: string, destinationName: string) => invoke<void>("hf_download", { repository, file, destinationName }),
   hfCancel: () => invoke<void>("hf_cancel"),
   chat: (
-    provider: Provider,
+    connectionId: string,
     messages: Message[],
     context: string | null,
     edit: boolean,
   ) =>
     invoke<{ text: string; replacement: string | null }>("ai_chat", {
-      provider,
+      connectionId,
       messages,
       context,
       edit,

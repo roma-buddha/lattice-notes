@@ -1,5 +1,5 @@
 import { externalMoves } from "./core/fileChanges";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Pencil,
@@ -82,6 +82,32 @@ export function WorkspaceOrganizer({
   const matches = (e: Entry): boolean =>
     e.name.toLowerCase().includes(query.toLowerCase()) ||
     e.children.some(matches);
+  const expandablePaths = useMemo(() => {
+    const collect = (items: Entry[]): string[] =>
+      items.flatMap((item) =>
+        item.kind === "note" ? [] : [item.path, ...collect(item.children)],
+      );
+    return collect(entries);
+  }, [entries]);
+  const allExpanded = expandablePaths.length > 0 && expandablePaths.every((path) => expanded.has(path));
+  const areaGroups = (() => {
+    const areas = new Map(state.areas.map((area) => [area.id, area]));
+    const groups = new Map<string, { name: string; icon?: string; vaults: Entry[] }>();
+    for (const area of state.areas)
+      groups.set(area.id, { name: area.name, icon: area.icon, vaults: [] });
+    groups.set("uncategorized", { name: "Uncategorized", vaults: [] });
+    for (const vault of entries.filter(matches)) {
+      const areaId = state.assignments[vault.path];
+      const target = areaId && areas.has(areaId) ? areaId : "uncategorized";
+      groups.get(target)!.vaults.push(vault);
+    }
+    return [
+      ...state.areas.map((area) => [area.id, groups.get(area.id)!] as const),
+      ["uncategorized", groups.get("uncategorized")!] as const,
+    ].filter(([id, group]) =>
+      query ? group.vaults.length > 0 : id !== "uncategorized" || group.vaults.length > 0,
+    );
+  })();
   return (
     <section
       className="organizer compact-organizer"
@@ -226,31 +252,14 @@ export function WorkspaceOrganizer({
             onChange={(e) => setQuery(e.target.value)}
           />
           <header className="explorer-heading">
-            <h2>Files</h2>
             <button
               className="icon"
-              aria-label="Expand all"
-              title="Expand all"
-              onClick={() =>
-                setExpanded(
-                  new Set(
-                    entries.flatMap((v) => [
-                      v.path,
-                      ...v.children.map((f) => f.path),
-                    ]),
-                  ),
-                )
-              }
+              aria-label={allExpanded ? "Collapse all" : "Expand all"}
+              title={allExpanded ? "Collapse all" : "Expand all"}
+              aria-pressed={allExpanded}
+              onClick={() => setExpanded(allExpanded ? new Set() : new Set(expandablePaths))}
             >
-              <ChevronsUpDown size={16} />
-            </button>
-            <button
-              className="icon"
-              aria-label="Collapse all"
-              title="Collapse all"
-              onClick={() => setExpanded(new Set())}
-            >
-              <ChevronsDownUp size={16} />
+              {allExpanded ? <ChevronsDownUp size={16} /> : <ChevronsUpDown size={16} />}
             </button>
             <button onClick={createVault}>
               <Plus size={15} />
@@ -281,7 +290,10 @@ export function WorkspaceOrganizer({
             className="organizer-tree"
             aria-label="All vaults, folders and notes"
           >
-            {entries.filter(matches).map((vault) => (
+            {areaGroups.map(([areaId, area]) => (
+              <section className="organizer-area-group" aria-labelledby={`area-${areaId}`} key={areaId}>
+                <h3 id={`area-${areaId}`}><AreaIcon icon={area.icon} />{area.name}<small>{area.vaults.length} {area.vaults.length === 1 ? "vault" : "vaults"}</small></h3>
+                {area.vaults.map((vault) => (
               <details
                 open={!!query || expanded.has(vault.path)}
                 className="explorer-vault"
@@ -301,19 +313,7 @@ export function WorkspaceOrganizer({
                     });
                   }}
                 >
-                  <AreaIcon
-                    icon={
-                      state.areas.find(
-                        (a) => a.id === state.assignments[vault.path],
-                      )?.icon
-                    }
-                  />
                   <strong>{vault.name}</strong>
-                  <small>
-                    {state.areas.find(
-                      (a) => a.id === state.assignments[vault.path],
-                    )?.name ?? "Uncategorized"}
-                  </small>
                   <button
                     className="icon organizer-actions"
                     aria-label={`Actions for ${vault.name}`}
@@ -455,8 +455,11 @@ export function WorkspaceOrganizer({
                   <p className="folder-empty">No folders yet</p>
                 )}
               </details>
+                ))}
+                {!area.vaults.length && <p className="organizer-area-empty">No vaults assigned yet.</p>}
+              </section>
             ))}
-            {!entries.filter(matches).length && (
+            {!areaGroups.length && (
               <p className="muted">No matching vaults.</p>
             )}
           </div>

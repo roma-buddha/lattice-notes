@@ -649,8 +649,18 @@ fn main() {
                 watcher: Mutex::new(None),
                 tab_strips: Mutex::new(std::collections::HashMap::new()),
             };
-            watch_workspace(app.handle(), &store).map_err(std::io::Error::other)?;
             app.manage(store);
+            // Starting a native recursive watcher can touch a large workspace.
+            // The cached/lightweight snapshot lets the window paint first; this
+            // background setup restores normal filesystem reconciliation without
+            // delaying the initial application window.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let state = handle.state::<Store>();
+                if let Err(error) = watch_workspace(&handle, &state) {
+                    eprintln!("Lotus could not start workspace watching: {error}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
