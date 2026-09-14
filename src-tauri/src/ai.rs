@@ -257,7 +257,12 @@ fn local_endpoint(raw: &str) -> Result<String, String> {
     }
     Ok(url.to_string().trim_end_matches('/').into())
 }
-fn connection_key(provider: &str, key: &str, destination: &str) -> Result<String, String> {
+fn connection_key(
+    provider: &str,
+    key: &str,
+    destination: &str,
+    connection_id: Option<&str>,
+) -> Result<String, String> {
     if provider == "lotus" || (provider == "local" && key.trim().is_empty()) {
         return Ok(String::new());
     }
@@ -268,11 +273,23 @@ fn connection_key(provider: &str, key: &str, destination: &str) -> Result<String
         }
         return Ok(value.into());
     }
-    let saved = saved_connections()?
-        .into_iter()
-        .rev()
-        .find(|connection| connection.provider == provider)
-        .ok_or_else(|| "Add an API key in Settings → AI models.".to_string())?;
+    let connections = saved_connections()?;
+    let saved = match connection_id.filter(|id| !id.trim().is_empty()) {
+        Some(id) => connections
+            .into_iter()
+            .find(|connection| connection.id == id)
+            .ok_or_else(|| "The selected saved API key is no longer available. Paste a key or choose another saved connection.".to_string())?,
+        // Retain compatibility with callers from an already-open older webview.
+        // Current UI always supplies the selected connection ID.
+        None => connections
+            .into_iter()
+            .rev()
+            .find(|connection| connection.provider == provider)
+            .ok_or_else(|| "Add an API key in Settings → AI models.".to_string())?,
+    };
+    if saved.provider != provider {
+        return Err("The selected saved API key belongs to a different provider.".into());
+    }
     if provider == "custom" && endpoint(provider, &saved.base_url)? != destination {
         return Err("Enter the API key again when changing the custom endpoint. The saved key will not be sent to a different address.".into());
     }
@@ -298,6 +315,17 @@ fn client_with_timeout(timeout: Duration) -> Result<reqwest::Client, String> {
         .build()
         .map_err(|_| "Could not start the AI connection.".into())
 }
+fn request_failure(action: &str, error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        return format!(
+            "{action} timed out. The provider may be busy; try again or choose another model."
+        );
+    }
+    if error.is_connect() {
+        return format!("Could not connect to the provider while {action}. Check your internet connection, firewall, or provider status.");
+    }
+    format!("The provider connection failed while {action}. Please retry.")
+}
 async fn response(mut response: reqwest::Response) -> Result<Value, String> {
     if !response.status().is_success() {
         return Err(match response.status().as_u16() {
@@ -321,33 +349,25 @@ async fn response(mut response: reqwest::Response) -> Result<Value, String> {
     serde_json::from_slice(&bytes)
         .map_err(|_| "The provider returned an unreadable response.".into())
 }
-async fn models(provider: &str, key: &str, destination: &str) -> Result<Vec<String>, String> {
+async fn models(_provider: &str, key: &str, destination: &str) -> Result<Vec<String>, String> {
     let request = client()?.get(format!("{destination}/models"));
     let request = if key.is_empty() {
         request
     } else {
         request.bearer_auth(key)
     };
-    let data = response(request.send().await.map_err(|_| {
-        "Cannot reach the provider. Check the server address and that it is running."
-    })?)
+    let data = response(
+        request
+            .send()
+            .await
+            .map_err(|error| request_failure("loading models", &error))?,
+    )
     .await?;
     let mut ids: Vec<String> = data["data"]
         .as_array()
         .ok_or("No model list returned.")?
         .iter()
-        .filter_map(|m| {
-            let id = m["id"].as_str()?;
-            let allowed = if provider == "openrouter" {
-                id.ends_with(":free")
-            } else {
-                !id.contains("whisper")
-                    && !id.contains("tts")
-                    && !id.contains("guard")
-                    && !id.contains("compound")
-            };
-            allowed.then(|| id.to_string())
-        })
+        .filter_map(|m| m["id"].as_str().map(str::to_string))
         .collect();
     ids.sort();
     if ids.is_empty() {
@@ -1051,9 +1071,10 @@ pub async fn ai_models(
     provider: String,
     key: String,
     base_url: Option<String>,
+    connection_id: Option<String>,
 ) -> Result<Vec<String>, String> {
     let destination = endpoint(&provider, base_url.as_deref().unwrap_or(""))?;
-    let key = connection_key(&provider, &key, &destination)?;
+    let key = connection_key(&provider, &key, &destination, connection_id.as_deref())?;
     models(&provider, &key, &destination).await
 }
 #[tauri::command]
@@ -1063,9 +1084,10 @@ pub async fn ai_save(
     model: String,
     name: Option<String>,
     base_url: Option<String>,
+    connection_id: Option<String>,
 ) -> Result<(), String> {
     let destination = endpoint(&provider, base_url.as_deref().unwrap_or(""))?;
-    let key = connection_key(&provider, &key, &destination)?;
+    let key = connection_key(&provider, &key, &destination, connection_id.as_deref())?;
     let model = if provider == "google" {
         model.trim().trim_start_matches("models/")
     } else {
@@ -1248,7 +1270,7 @@ async fn complete(
         request
             .send()
             .await
-            .map_err(|_| "AI request timed out or could not connect. Retry when online.")?,
+            .map_err(|error| request_failure("sending the AI request", &error))?,
     )
     .await?;
     parse_reply(&data, edit, provider == "lotus")
