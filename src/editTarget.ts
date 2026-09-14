@@ -14,6 +14,71 @@ export type EditTarget = {
   ) => void;
   selectAll: () => void;
 };
+
+type ViewportAnchor = {
+  scroll: HTMLElement;
+  position: number;
+  y: number;
+};
+
+function captureViewportAnchor(view: EditorView): ViewportAnchor | null {
+  const scroll = view.dom.closest<HTMLElement>(".document-scroll");
+  if (!scroll) return null;
+
+  const bounds = scroll.getBoundingClientRect();
+  const content = view.contentDOM.getBoundingClientRect();
+  const position = view.posAtCoords(
+    {
+      x: Math.max(bounds.left + 20, content.left + 4),
+      y: bounds.top + 12,
+    },
+    false,
+  );
+  if (position === null) return null;
+
+  const y = view.coordsAtPos(position)?.top;
+  return y === undefined ? null : { scroll, position, y };
+}
+
+function mapPosition(
+  position: number,
+  from: number,
+  to: number,
+  inserted: number,
+) {
+  if (position <= from) return position;
+  if (position >= to) return position + inserted - (to - from);
+  return from + inserted;
+}
+
+function restoreViewportAnchor(
+  view: EditorView,
+  anchor: ViewportAnchor | null,
+  from: number,
+  to: number,
+  inserted: number,
+) {
+  if (!anchor) return;
+  const position = mapPosition(anchor.position, from, to, inserted);
+  const restore = () => {
+    if (!view.dom.isConnected || position > view.state.doc.length) return;
+    view.requestMeasure({
+      read: () => view.coordsAtPos(position)?.top,
+      write: (nextY) => {
+        if (nextY !== undefined) anchor.scroll.scrollTop += nextY - anchor.y;
+      },
+    });
+  };
+
+  // The controlled editor receives the new draft after the menu command.
+  // Wait for that render before measuring, then repeat once for live-preview
+  // decorations that settle on the following frame.
+  requestAnimationFrame(() => {
+    restore();
+    requestAnimationFrame(restore);
+  });
+}
+
 export function readTarget(element: HTMLElement): EditTarget {
   const text = window.getSelection()?.toString() ?? "";
   return {
@@ -32,10 +97,7 @@ export function readTarget(element: HTMLElement): EditTarget {
 }
 export function codeTarget(view: EditorView): EditTarget {
   const { from, to } = view.state.selection.main;
-  const scroll = view.dom.closest<HTMLElement>(".document-scroll");
-  const top = scroll?.scrollTop ?? 0;
-  const lineStart = view.state.doc.lineAt(from).from;
-  const y = view.coordsAtPos(lineStart)?.top;
+  const viewportAnchor = captureViewportAnchor(view);
   return {
     text: view.state.doc.toString(),
     from,
@@ -48,20 +110,7 @@ export function codeTarget(view: EditorView): EditTarget {
         annotations: isolateHistory.of("full"),
       });
       view.focus();
-      if (scroll) {
-        scroll.scrollTop = top;
-        view.requestMeasure({
-          read: () =>
-            view.coordsAtPos(Math.min(lineStart, view.state.doc.length))?.top,
-          write: (nextY) => {
-            scroll.scrollTop += y !== undefined && nextY !== undefined ? nextY - y : 0;
-            requestAnimationFrame(() => {
-              const settled = view.coordsAtPos(Math.min(lineStart, view.state.doc.length))?.top;
-              if (y !== undefined && settled !== undefined) scroll.scrollTop += settled - y;
-            });
-          },
-        });
-      }
+      restoreViewportAnchor(view, viewportAnchor, start, end, text.length);
     },
     selectAll: () => {
       view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });

@@ -110,8 +110,41 @@ try {
     await page.getByRole("tab", { name: "Current note", exact: true }).count(),
     1,
   );
+  await page.getByRole("button", { name: "Close current note" }).click();
+  await until(
+    async () =>
+      (await page
+        .getByRole("tab", { name: "Current note", exact: true })
+        .count()) === 0,
+    "Closing Current note did not remove its tab",
+  );
+  await page
+    .locator('.tree-row[data-path="Work/Notes/Beta.md"] .tree-select')
+    .click();
+  await until(
+    async () =>
+      (await page
+        .getByRole("tab", { name: "Current note", exact: true })
+        .count()) === 1,
+    "Sidebar click did not recreate Current note",
+  );
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("lotus-note-pointer-drop", {
+        detail: {
+          path: "Work/Notes/Alpha.md",
+          target: "tabs",
+          tabId: 0,
+        },
+      }),
+    ),
+  );
+  await until(
+    async () => (await page.locator(".note-title").inputValue()) === "Alpha",
+    "Dropping a note on Current note did not replace its document",
+  );
   console.log(
-    "Browser child navigation and Current note sidebar replacement passed.",
+    "Browser navigation and Current note close, reopen, and drop replacement passed.",
   );
 } finally {
   await browser?.close().catch(() => {});

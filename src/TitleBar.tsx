@@ -22,6 +22,7 @@ export type TabTransfer = {
   source?: string;
   id?: number;
   targetX?: number;
+  targetId?: number;
 };
 export type NoteTab = {
   id: number;
@@ -96,23 +97,40 @@ export function TitleBar({
   useEffect(() => {
     const receivePointerDrop = (event: Event) => {
       const detail = (
-        event as CustomEvent<{ path?: unknown; target?: unknown }>
+        event as CustomEvent<{
+          path?: unknown;
+          target?: unknown;
+          tabId?: unknown;
+        }>
       ).detail;
       if (
-        detail?.target !== "tabs" ||
+        (detail?.target !== "tabs" &&
+          !(
+            typeof detail?.tabId === "number" && Number.isInteger(detail.tabId)
+          )) ||
         typeof detail.path !== "string" ||
         !detail.path
       )
         return;
       // This is deliberately separate from HTML DnD.  It is the dependable
       // same-window route when WebView2 declines to surface DataTransfer data.
-      dropTab({ path: detail.path });
+      dropTab({
+        path: detail.path,
+        targetId:
+          typeof detail.tabId === "number" && Number.isInteger(detail.tabId)
+            ? detail.tabId
+            : undefined,
+      });
     };
     window.addEventListener("lotus-note-pointer-drop", receivePointerDrop);
     return () =>
       window.removeEventListener("lotus-note-pointer-drop", receivePointerDrop);
   }, [dropTab]);
-  const accept = (event: React.DragEvent, before?: number) => {
+  const accept = (
+    event: React.DragEvent,
+    before?: number,
+    targetId?: number,
+  ) => {
     event.preventDefault();
     event.stopPropagation();
     setDragOver(false);
@@ -121,7 +139,7 @@ export function TitleBar({
       if (value) {
         const transfer = JSON.parse(value) as TabTransfer;
         handledDrag.current = transfer.id ?? null;
-        dropTab(transfer, before);
+        dropTab({ ...transfer, targetId }, before);
       } else {
         const raw =
           event.dataTransfer.getData("application/x-lotus-note") ||
@@ -140,7 +158,7 @@ export function TitleBar({
             : event.dataTransfer.getData("text/notus-kind") === "note"
               ? event.dataTransfer.getData("text/notus-path")
               : "";
-        if (path) dropTab({ path }, before);
+        if (path) dropTab({ path, targetId }, before);
       }
     } catch {
       onError("Could not open the dragged tab.");
@@ -464,7 +482,7 @@ export function TitleBar({
                     ]?.id
                   : tab.id;
               setInsert(null);
-              accept(event, before);
+              accept(event, before, tab.id);
             }}
           >
             <button

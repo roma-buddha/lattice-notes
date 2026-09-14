@@ -47,6 +47,24 @@ const displayName = (name: string) =>
     .replace(/\bq\d[^ ]*/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+const connectedModelName = (connection: Connection) => {
+  if (connection.source !== "local") return connection.model;
+
+  // Lotus keeps the full GGUF path as `model` so it can restart the runtime.
+  // Prefer its saved display name in the settings UI, without changing that
+  // runtime-critical value.
+  const savedName = connection.name
+    ?.replace(/^Lotus local runtime\s*·\s*/i, "")
+    .trim();
+  return (
+    savedName ||
+    connection.model
+      .split(/[\\/]/)
+      .pop()
+      ?.replace(/\.gguf$/i, "") ||
+    connection.model
+  );
+};
 
 export function AISettings() {
   const [tab, setTab] = useState<Tab>("Your models"),
@@ -342,7 +360,7 @@ export function AISettings() {
           {connections.map((c) => (
             <article className="ai-model-card" key={c.id}>
               <div>
-                <strong>{c.model}</strong>
+                <strong>{connectedModelName(c)}</strong>
                 <small>
                   {source(c)} · {connectionName(c)}
                 </small>

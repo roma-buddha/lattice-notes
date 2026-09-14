@@ -108,15 +108,13 @@ export function BrowserPane({
       try {
         const scale = await appWindow.scaleFactor();
         if (disposed) return null;
-        // DOM bounds are relative to Lotus's main webview, but Tauri's native
-        // child-webview positions are desktop-relative.  Use the main
-        // webview's client origin rather than the outer-window origin so the
-        // child starts exactly at the browser host and cannot cover the
-        // sidebar or the tab strip.
-        const parentPosition = await Webview.getCurrent().position();
+        // Tauri child-webview bounds are relative to their parent window.
+        // `getBoundingClientRect` is likewise relative to Lotus's main
+        // webview, so adding the parent's desktop position here would offset
+        // the child outside its DOM host and over the sidebar.
         const position = new PhysicalPosition(
-          parentPosition.x + Math.round(rect.left * scale),
-          parentPosition.y + Math.round(rect.top * scale),
+          Math.round(rect.left * scale),
+          Math.round(rect.top * scale),
         );
         const size = new PhysicalSize(
           Math.max(1, Math.round(rect.width * scale)),

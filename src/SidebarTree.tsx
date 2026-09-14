@@ -207,7 +207,9 @@ export function SidebarTree(props: Props) {
                   }
                   const target = document
                     .elementFromPoint(event.clientX, event.clientY)
-                    ?.closest<HTMLElement>("[data-path], [data-lotus-drop]");
+                    ?.closest<HTMLElement>(
+                      "[data-path], [data-tab-id], [data-lotus-drop]",
+                    );
                   document
                     .querySelectorAll(
                       ".pointer-drop-before, .pointer-drop-after, .pointer-drop-target",
@@ -266,13 +268,17 @@ export function SidebarTree(props: Props) {
                   }
                   const target = document
                     .elementFromPoint(event.clientX, event.clientY)
-                    ?.closest<HTMLElement>("[data-path], [data-lotus-drop]");
-                  if (target?.dataset.lotusDrop) {
+                    ?.closest<HTMLElement>(
+                      "[data-path], [data-tab-id], [data-lotus-drop]",
+                    );
+                  const tabId = Number(target?.dataset.tabId);
+                  if (target?.dataset.lotusDrop || Number.isInteger(tabId)) {
                     window.dispatchEvent(
                       new CustomEvent("lotus-note-pointer-drop", {
                         detail: {
                           path: drag.path,
-                          target: target.dataset.lotusDrop,
+                          target: target?.dataset.lotusDrop,
+                          tabId: Number.isInteger(tabId) ? tabId : undefined,
                         },
                       }),
                     );

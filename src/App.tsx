@@ -1459,8 +1459,13 @@ export default function App() {
     const visibleBrowser = tabs.find(
       (tab) => tab.id === activeTabRef.current,
     )?.browser;
-    // The first tab is a permanent current-note slot. Target it before any
-    // asynchronous work so the tab destination never depends on timing.
+    // Recreate Current note only when it is needed. Closing it removes the
+    // tab from the strip, while a sidebar note reliably brings it back.
+    setTabs((previous) =>
+      previous.some((tab) => tab.id === 0)
+        ? previous
+        : [{ id: 0, path: null, pinned: true }, ...previous],
+    );
     activeTabRef.current = 0;
     setActiveTab(0);
     if (!preserveVault) setVaultPath(path.split("/")[0]);
@@ -1540,11 +1545,17 @@ export default function App() {
   }, [tabs]);
   const closeCurrentNote = async () => {
     if (!(await saveAll())) return;
-    activeTabRef.current = 0;
-    setActiveTab(0);
-    setTabs((previous) =>
-      previous.map((tab) => (tab.id === 0 ? { ...tab, path: null } : tab)),
-    );
+    const wasActive = activeTabRef.current === 0;
+    const remaining = tabs.filter((tab) => tab.id !== 0);
+    setTabs(remaining);
+    if (!wasActive) return;
+    const next = remaining[0];
+    if (next) {
+      await selectTab(next.id);
+      return;
+    }
+    activeTabRef.current = -1;
+    setActiveTab(-1);
     resetDocument();
     setSelected("");
     storage.remove(`notus-last:${current.current.root}`);
@@ -2092,7 +2103,10 @@ export default function App() {
         rest.splice(Math.max(0, at < 0 ? rest.length : at), 0, moving);
         return rest;
       });
-    } else if (transfer.path) await openExtraTab(transfer.path);
+    } else if (transfer.path) {
+      if (transfer.targetId === 0) await openCurrentNote(transfer.path);
+      else await openExtraTab(transfer.path, false, before);
+    }
   };
   const returnTab = async (id: number) => {
     const tab = tabs.find((t) => t.id === id);
