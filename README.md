@@ -1,6 +1,6 @@
 # Lotus
 
-A Windows Markdown app with a quiet, Ohana-inspired interface. Opens directly into your notes. No Lotus account, server, local AI runtime, database, or starter content. Optional AI connects directly to your chosen provider using your own API key.
+A Windows Markdown app with a quiet, focused interface. Opens directly into your notes. No Lotus account, server, local AI runtime, database, or starter content. Optional AI connects directly to your chosen provider using your own API key.
 
 ## Install Lotus 1.0.1
 
@@ -19,7 +19,7 @@ Windows WebView2 is required. It is preinstalled on current Windows 10 and 11 sy
 Use this when you want to build Lotus yourself. Install Node.js, Rust with the MSVC toolchain, Visual Studio C++ Build Tools, and Windows WebView2 first.
 
 ```powershell
-git clone https://github.com/roma-buddha/lattice-notes.git lotus
+git clone https://github.com/roma-buddha/lotus-notes.git lotus
 cd lotus
 npm ci
 npm run package:win
