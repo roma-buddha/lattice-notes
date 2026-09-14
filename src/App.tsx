@@ -92,6 +92,20 @@ import { editorItems } from "./EditorMenu";
 import { codeTarget, readTarget, type EditTarget } from "./editTarget";
 import { useBookmarks, moveBookmarks } from "./bookmarks";
 
+// React Strict Mode intentionally mounts effects twice in development. Keep the
+// native startup walk single-flight so diagnostic rendering cannot make a large
+// vault take two complete passes before it becomes usable.
+let startupSnapshotRequest: Promise<Snapshot> | undefined;
+function loadStartupSnapshot() {
+  if (!startupSnapshotRequest) {
+    startupSnapshotRequest = api.startupSnapshot().catch((error) => {
+      startupSnapshotRequest = undefined;
+      throw error;
+    });
+  }
+  return startupSnapshotRequest;
+}
+
 type DialogState = { kind: "delete"; entry: Entry };
 type ActionMenu = { entry: Entry; anchor: Anchor; settings?: boolean };
 const storage = {
@@ -423,7 +437,7 @@ export default function App() {
     });
     return () => cancelAnimationFrame(frame);
   }, [positionPath, positionLocked]);
-  const loadDocument = (next: Document) => {
+  const loadDocument = (next: Document, targetTabId = activeTabRef.current) => {
     rememberView();
     let text = next.content;
     let base = next;
@@ -474,11 +488,11 @@ export default function App() {
     setDoc(base);
     setActivePane("primary");
     setTabs((previous) =>
-      previous.some((tab) => tab.id === activeTabRef.current)
+      previous.some((tab) => tab.id === targetTabId)
         ? previous.map((tab) =>
-            tab.id === activeTabRef.current ? { ...tab, path: next.path } : tab,
+            tab.id === targetTabId ? { ...tab, path: next.path } : tab,
           )
-        : [...previous, { id: activeTabRef.current, path: next.path }],
+        : [...previous, { id: targetTabId, path: next.path }],
     );
     setDraft(text);
     setStatus(
@@ -628,14 +642,23 @@ export default function App() {
   const run = (task: () => Promise<void>) => {
     void task().catch((e) => setError(String(e)));
   };
+  const pendingCurrentNote = useRef<string | null>(null);
+  const openingCurrentNote = useRef(false);
   const openNote = async (path: string) => {
-    if (navigating.current) return;
+    // A sidebar click is an intent to replace the current-note slot.  Keep the
+    // newest one while saving or reading instead of silently dropping it.
+    pendingCurrentNote.current = path;
+    if (openingCurrentNote.current) return;
+    openingCurrentNote.current = true;
     navigating.current = true;
     try {
-      // Sidebar and search navigation always replace the anchored first tab.
-      // The secondary pane changes only through its explicit header/drop actions.
-      await openCurrentNote(path);
+      while (pendingCurrentNote.current) {
+        const next = pendingCurrentNote.current;
+        pendingCurrentNote.current = null;
+        await openCurrentNote(next);
+      }
     } finally {
+      openingCurrentNote.current = false;
       navigating.current = false;
     }
   };
@@ -902,8 +925,7 @@ export default function App() {
       };
     }
     let backgroundRefresh: number | undefined;
-    void api
-      .startupSnapshot()
+    void loadStartupSnapshot()
       .then(async (next) => {
         if (cancelled) return;
         if (next.legacy_root)
@@ -1434,21 +1456,27 @@ export default function App() {
     setError("");
   };
   const openCurrentNote = async (path: string, preserveVault = false) => {
+    const visibleBrowser = tabs.find(
+      (tab) => tab.id === activeTabRef.current,
+    )?.browser;
+    // The first tab is a permanent current-note slot. Target it before any
+    // asynchronous work so the tab destination never depends on timing.
+    activeTabRef.current = 0;
+    setActiveTab(0);
     if (!preserveVault) setVaultPath(path.split("/")[0]);
     if (!(await saveAll()))
       throw new Error("Save or recover the current draft first.");
     const next = await api.read(path);
-    const visibleBrowser = tabs.find(
-      (tab) => tab.id === activeTabRef.current,
-    )?.browser;
-    if (visibleBrowser) await hideBrowserSession(visibleBrowser.id).catch(() => {});
+    // A native WebView2 hide can be delayed by a page process. It is cleanup,
+    // not a prerequisite for navigating Lotus, so never let it hold the
+    // sidebar click hostage. BrowserPane's unmount cleanup hides it again.
+    if (visibleBrowser)
+      void hideBrowserSession(visibleBrowser.id).catch(() => {});
     // Sidebar navigation always replaces the pinned first tab. Extra tabs are
     // reserved for notes explicitly opened from the menu or dropped in the strip.
-    activeTabRef.current = 0;
-    setActiveTab(0);
     setTableActions(null);
     setTableMenu(null);
-    loadDocument(next);
+    loadDocument(next, 0);
     setSelected(path);
     setError("");
   };
@@ -1510,9 +1538,21 @@ export default function App() {
         receiveBrowserDrop,
       );
   }, [tabs]);
+  const closeCurrentNote = async () => {
+    if (!(await saveAll())) return;
+    activeTabRef.current = 0;
+    setActiveTab(0);
+    setTabs((previous) =>
+      previous.map((tab) => (tab.id === 0 ? { ...tab, path: null } : tab)),
+    );
+    resetDocument();
+    setSelected("");
+    storage.remove(`notus-last:${current.current.root}`);
+  };
   const closeTab = async (id: number) => {
     const closing = tabs.find((tab) => tab.id === id);
-    if (!closing || closing.pinned) return;
+    if (!closing) return;
+    if (closing.pinned) return closeCurrentNote();
     if (closing.browser) {
       if (secondaryBrowser?.id === closing.browser.id)
         setSecondaryBrowser(null);

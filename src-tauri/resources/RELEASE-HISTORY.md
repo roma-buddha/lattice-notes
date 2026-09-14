@@ -2,6 +2,17 @@
 
 This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
+## 0.14.11 — 2026-09-14 — Reliable embedded browser and Current note selection
+
+- Corrected native WebView2 browser placement using the main webview's desktop client origin plus the browser host bounds. Browser pages now occupy only the note workspace, leaving the sidebar and tab strip interactive.
+- Serialized browser-child creation and navigation so commands wait for a registered WebView2 child instead of intermittently failing with `webview not found`. Switching tabs no longer lets an older React host hide the currently active browser child.
+- Made ordinary sidebar note selection complete on pointer release, which avoids WebView2 losing the nested button click after drag-and-drop pointer capture. A simple click now consistently replaces the permanent **Current note** slot.
+- Kept the pinned tab visibly named **Current note** while its contents change. Closing it clears the active document without closing the slot.
+
+**Compatibility:** no vault, draft, organizer, browser-profile, or AI-connection migration is required.
+
+**Verification:** frontend lint, TypeScript build, 35 frontend tests, 28 native tests, browser-to-sidebar desktop smoke test, general desktop smoke test, and Windows NSIS package.
+
 ## 0.14.10 — 2026-09-14 — Faster startup and reliable workspace flow
 
 - Deferred native recursive workspace watching until after the Lotus window is ready. Cached workspace data and the lightweight startup snapshot can therefore reach the screen before watcher setup touches a large vault; normal create, rename, delete, and open-note reconciliation resumes immediately afterward.

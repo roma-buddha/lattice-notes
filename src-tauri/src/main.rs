@@ -7,7 +7,14 @@ mod transfer;
 mod windows;
 mod workspace;
 use notify::{event::ModifyKind, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::{fs, path::PathBuf, sync::Mutex};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
 use tauri::{Emitter, Manager};
 use workspace::{Document, Snapshot, Workspace};
 struct Store {
@@ -15,6 +22,7 @@ struct Store {
     config: PathBuf,
     views: Mutex<std::collections::HashMap<String, Vec<String>>>,
     watcher: Mutex<Option<RecommendedWatcher>>,
+    watcher_started: AtomicBool,
     tab_strips: Mutex<std::collections::HashMap<String, TabStripBounds>>,
 }
 
@@ -251,13 +259,36 @@ fn snapshot(state: tauri::State<Store>) -> Result<Snapshot, String> {
         .map_err(|e| e.to_string())?
         .snapshot()
 }
+fn start_workspace_watcher(app: tauri::AppHandle) {
+    let started = app
+        .state::<Store>()
+        .watcher_started
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok();
+    if !started {
+        return;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Store>();
+        if let Err(error) = watch_workspace(&app, &state) {
+            eprintln!("Lotus could not start workspace watching: {error}");
+            state.watcher_started.store(false, Ordering::Release);
+        }
+    });
+}
+
 #[tauri::command]
-fn startup_snapshot(state: tauri::State<Store>) -> Result<Snapshot, String> {
-    state
+fn startup_snapshot(app: tauri::AppHandle, state: tauri::State<Store>) -> Result<Snapshot, String> {
+    let snapshot = state
         .workspace
         .lock()
         .map_err(|e| e.to_string())?
-        .startup_snapshot()
+        .startup_snapshot()?;
+    // The first tree walk must finish before a native recursive watcher begins.
+    // On Windows both enumerate the vault; starting them together made launch
+    // timing depend on which one obtained filesystem access first.
+    start_workspace_watcher(app);
+    Ok(snapshot)
 }
 #[tauri::command]
 fn search_notes(
@@ -647,20 +678,10 @@ fn main() {
                 config,
                 views: Mutex::new(std::collections::HashMap::new()),
                 watcher: Mutex::new(None),
+                watcher_started: AtomicBool::new(false),
                 tab_strips: Mutex::new(std::collections::HashMap::new()),
             };
             app.manage(store);
-            // Starting a native recursive watcher can touch a large workspace.
-            // The cached/lightweight snapshot lets the window paint first; this
-            // background setup restores normal filesystem reconciliation without
-            // delaying the initial application window.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let state = handle.state::<Store>();
-                if let Err(error) = watch_workspace(&handle, &state) {
-                    eprintln!("Lotus could not start workspace watching: {error}");
-                }
-            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

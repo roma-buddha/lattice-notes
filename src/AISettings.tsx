@@ -21,6 +21,7 @@ import {
   type Connection,
   type LibraryFile,
   type ModelLibrary,
+  type ProviderModel,
   type Provider,
 } from "./ai";
 
@@ -63,8 +64,9 @@ export function AISettings() {
     [baseUrl, setBaseUrl] = useState(""),
     [trusted, setTrusted] = useState(false),
     [showKey, setShowKey] = useState(false),
-    [models, setModels] = useState<string[]>([]),
+    [models, setModels] = useState<ProviderModel[]>([]),
     [model, setModel] = useState(""),
+    [freeOnly, setFreeOnly] = useState(false),
     [savedConnectionId, setSavedConnectionId] = useState("");
   const [query, setQuery] = useState(""),
     [hfModels, setHfModels] = useState<HfModel[]>([]),
@@ -145,6 +147,7 @@ export function AISettings() {
     setKey("");
     setModels([]);
     setModel("");
+    setFreeOnly(false);
     setTrusted(false);
   };
   const chooseSavedConnection = (id: string) => {
@@ -254,6 +257,10 @@ export function AISettings() {
           : browser === "repositories"
             ? "Hugging Face models"
             : "GGUF files";
+  const visibleModels =
+    provider === "openrouter" && freeOnly
+      ? models.filter((item) => item.free)
+      : models;
   return (
     <div className="ai-settings">
       <h3>AI models</h3>
@@ -448,7 +455,7 @@ export function AISettings() {
                   savedConnectionId,
                 );
                 setModels(next);
-                setModel(next[0] ?? "");
+                setModel(next[0]?.id ?? "");
                 setBrowser("api");
               })
             }
@@ -602,20 +609,37 @@ export function AISettings() {
             </button>
           </header>
           {browser === "api" && (
-            <div className="model-browser-list">
-              {models.map((item) => (
-                <button
-                  key={item}
-                  className={model === item ? "selected" : ""}
-                  onClick={() => {
-                    setModel(item);
-                    setBrowser(null);
-                  }}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
+            <>
+              {provider === "openrouter" && (
+                <label className="model-browser-filter">
+                  <input
+                    type="checkbox"
+                    checked={freeOnly}
+                    onChange={(event) => setFreeOnly(event.target.checked)}
+                  />
+                  Free only
+                </label>
+              )}
+              <div className="model-browser-list">
+                {visibleModels.map((item) => (
+                  <button
+                    key={item.id}
+                    className={model === item.id ? "selected" : ""}
+                    onClick={() => {
+                      setModel(item.id);
+                      setBrowser(null);
+                    }}
+                  >
+                    {item.id}
+                  </button>
+                ))}
+                {!visibleModels.length && (
+                  <p className="muted">
+                    No free models are currently reported by OpenRouter.
+                  </p>
+                )}
+              </div>
+            </>
           )}
           {browser === "repositories" && (
             <div className="model-browser-list">

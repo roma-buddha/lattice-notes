@@ -1,6 +1,6 @@
 {
   "name": "lotus",
-  "version": "0.14.10",
+  "version": "0.14.11",
   "private": true,
   "type": "module",
   "description": "A calm Markdown workspace for vaults, folders, and notes.",
@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:native": "cargo test --manifest-path src-tauri/Cargo.toml",
     "smoke": "node scripts/smoke-lotus-0120.mjs",
+    "smoke:browser": "node scripts/smoke-browser-tabs.mjs",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write src scripts README.md package.json",
     "package:win": "tauri build --bundles nsis",

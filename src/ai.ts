@@ -18,6 +18,7 @@ export type Connection = {
   base_url?: string;
   source?: "api" | "local";
 };
+export type ProviderModel = { id: string; free: boolean };
 export type ModelLibrary = { default_root: string; roots: string[] };
 export type LibraryFile = {
   name: string;
@@ -53,7 +54,12 @@ export type NoteContext = {
 export const ai = {
   connections: () => invoke<Connection[]>("ai_connections"),
   models: (provider: Provider, key: string, baseUrl = "", connectionId = "") =>
-    invoke<string[]>("ai_models", { provider, key, baseUrl, connectionId }),
+    invoke<ProviderModel[]>("ai_models", {
+      provider,
+      key,
+      baseUrl,
+      connectionId,
+    }),
   save: (
     provider: Provider,
     key: string,

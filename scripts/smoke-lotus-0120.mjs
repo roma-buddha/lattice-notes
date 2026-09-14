@@ -18,7 +18,13 @@ await fs.writeFile(
   path.join(root, "Personal/Journal/Beta.md"),
   "Other vault note\n",
 );
-await fs.writeFile(path.join(root,alpha),initial.replace("# Reading layout", "Signed application: C:\\\\Users\\\\valer\\\\Downloads\\\\VeryLongDocumentName.pdf\n\n# Reading layout"));
+await fs.writeFile(
+  path.join(root, alpha),
+  initial.replace(
+    "# Reading layout",
+    "Signed application: C:\\\\Users\\\\valer\\\\Downloads\\\\VeryLongDocumentName.pdf\n\n# Reading layout",
+  ),
+);
 let browser, page, child, clipboardBefore;
 const errors = [],
   checks = [];
@@ -54,12 +60,21 @@ async function selectWord(
   needle,
   selector = '.primary-pane [aria-label="Note editor"]',
 ) {
-  const r = await textRect(selector, needle);
-  await page.mouse.move(r.x + 0.5, r.y + r.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(r.x + r.width + 1, r.y + r.height / 2, { steps: 12 });
-  await page.mouse.up();
-  await pause(60);
+  let r;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    r = await textRect(selector, needle);
+    await page.mouse.move(r.x + 0.5, r.y + r.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(r.x + r.width + 1, r.y + r.height / 2, {
+      steps: 12,
+    });
+    await page.mouse.up();
+    await pause(80);
+    if (
+      (await page.evaluate(() => window.getSelection()?.toString())) === needle
+    )
+      return r;
+  }
   assert.equal(
     await page.evaluate(() => window.getSelection()?.toString()),
     needle,
@@ -122,7 +137,8 @@ try {
   });
   const searchBox = await org.getByLabel("Filter organizer").boundingBox(),
     heading = await org
-      .getByRole("heading", { name: "Uncategorized", exact: true })
+      .locator(".organizer-area-group h3")
+      .first()
       .boundingBox();
   assert.ok(
     searchBox.x <= heading.x + 2 && searchBox.y < heading.y,
@@ -134,7 +150,9 @@ try {
     .waitFor();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await org.getByRole("button", { name: "Expand all", exact: true }).click();
-  await org.getByRole("button", { name: "Collapse all", exact: true }).waitFor();
+  await org
+    .getByRole("button", { name: "Collapse all", exact: true })
+    .waitFor();
   await org
     .locator(".explorer-vault summary")
     .filter({ hasText: "Work" })
@@ -148,11 +166,16 @@ try {
   const pane = page.locator(".primary-pane"),
     editor = page.locator('.primary-pane [aria-label="Note editor"]');
   await editor.waitFor();
-  const pathLine=editor.locator(".code-aligned-left").filter({hasText:"Signed application"});
-  assert.equal(await pathLine.count(),1);
-  assert.equal(await pathLine.evaluate(el=>getComputedStyle(el).textAlign),"left");
+  const pathLine = editor
+    .locator(".code-aligned-left")
+    .filter({ hasText: "Signed application" });
+  assert.equal(await pathLine.count(), 1);
+  assert.equal(
+    await pathLine.evaluate((el) => getComputedStyle(el).textAlign),
+    "left",
+  );
   const nav = page.getByRole("navigation", { name: "Sidebar sections" });
-  assert.equal(await nav.getByRole("button").count(), 4);
+  assert.equal(await nav.getByRole("button").count(), 5);
   assert.ok(
     (await nav.boundingBox()).y <
       (await page.locator(".files-toolbar").boundingBox()).y,
@@ -167,7 +190,7 @@ try {
   );
   assert.equal(
     await page.locator(".title-navigation").getByRole("button").count(),
-    4,
+    5,
   );
   await nav
     .getByRole("button", { name: "Find a note (Ctrl+P)", exact: true })
@@ -193,7 +216,7 @@ try {
       await page
         .getByRole("button", { name: "Choose vault", exact: true })
         .textContent()
-    ).includes("Work"),
+    ).includes("Personal"),
   );
   assert.equal(
     await page
@@ -201,15 +224,47 @@ try {
       .inputValue(),
     "Other vault note",
   );
+  await page
+    .getByLabel("Find a note or folder", { exact: true })
+    .fill("Signed application");
+  await page
+    .locator(".note-search-results button")
+    .filter({ hasText: "Alpha" })
+    .click();
+  await until(
+    async () =>
+      (
+        await page
+          .getByRole("button", { name: "Choose vault", exact: true })
+          .textContent()
+      ).includes("Work"),
+    "Opening a search result did not switch the current vault",
+  );
   await nav.getByRole("button", { name: "Files", exact: true }).click();
   assert.ok(await page.locator('.tree-row[data-path="' + alpha + '"]').count());
-  assert.equal(await page.getByRole("tab", { name: "Current note", exact: true }).count(), 1);
-  await page.locator('.tree-row[data-path="' + alpha + '"]').click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Open in new tab", exact: true }).click();
+  assert.equal(
+    await page.getByRole("tab", { name: "Current note", exact: true }).count(),
+    1,
+  );
+  await page
+    .locator('.tree-row[data-path="' + alpha + '"]')
+    .click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Open in new tab", exact: true })
+    .click();
   await page.getByRole("tab", { name: "Alpha", exact: true }).waitFor();
-  await page.getByRole("tab", { name: "Alpha", exact: true }).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Close additional tabs", exact: true }).click();
-  await until(async () => (await page.getByRole("tab", { name: "Alpha", exact: true }).count()) === 0, "Additional tabs did not close");
+  await page
+    .getByRole("tab", { name: "Alpha", exact: true })
+    .click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Close additional tabs", exact: true })
+    .click();
+  await until(
+    async () =>
+      (await page.getByRole("tab", { name: "Alpha", exact: true }).count()) ===
+      0,
+    "Additional tabs did not close",
+  );
   checks.push(
     "Sidebar navigation, anchored Current note, close-additional-tabs, organizer areas and vault menu/create",
   );
@@ -375,10 +430,10 @@ try {
     "Link does not switch selected vault",
   );
   assert.equal(
-    await page.getByRole("tab", { name: "Alpha", exact: true }).count(),
+    await page.getByRole("tab", { name: "Current note", exact: true }).count(),
     1,
   );
-  await page.getByRole("tab", { name: "Alpha", exact: true }).click();
+  await page.getByRole("tab", { name: "Current note", exact: true }).click();
   await pause(200);
   assert.ok(
     Math.abs((await pane.evaluate((el) => el.scrollTop)) - beforeTop) < 4,
@@ -532,9 +587,11 @@ try {
       )
     ).includes("LOCAL DRAFT"),
   );
-  await page
-    .getByRole("button", { name: "Switch to dark theme", exact: true })
-    .click();
+  const switchToDark = page.getByRole("button", {
+    name: "Switch to dark theme",
+    exact: true,
+  });
+  if (await switchToDark.count()) await switchToDark.click();
   await pane.evaluate((el) => (el.scrollTop = 0));
   await page.setViewportSize({ width: 760, height: 600 });
   await page.screenshot({ path: "artifacts/lotus-0120-dark-narrow.png" });

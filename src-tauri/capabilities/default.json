@@ -5,6 +5,7 @@
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview",
+    "core:webview:allow-webview-position",
     "core:webview:allow-webview-close",
     "core:webview:allow-webview-hide",
     "core:webview:allow-set-webview-position",
