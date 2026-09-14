@@ -50,17 +50,17 @@ Tauri 2 / Rust for native windows and validated filesystem operations; React 19 
 
 ## Workspace
 
-New installations ask where to create a Lotus storage folder on first launch (Cancel uses Documents/Lotus). Existing installations retain their chosen parent folder, including Documents/Notus, and organize vault directories under **Vaults**. Internal metadata and Trash become **.lotus-state** and **.lotus-trash**, alongside Vaults. Existing relative note identities are preserved and local bookmarks/appearance preferences migrate to the new root. Close detached windows before switching workspaces.
+New installations ask where to create a Lotus storage folder on first launch (Cancel uses Documents/Lotus). Existing installations retain their chosen parent folder and organize vault directories under **Vaults**. Internal metadata and Trash become **.lotus-state** and **.lotus-trash**, alongside Vaults. Existing relative note identities are preserved and local bookmarks/appearance preferences migrate to the new root. Close detached windows before switching workspaces.
 
 ```text
-Lotus/                        # or your existing Notus parent
+Lotus/                        # your chosen storage folder
   Vaults/
-    Eco-innovation/           # vault
-      Singapore/              # folder
-        Simon.md              # note
-    Personal/
-      Journal/
-        September.md
+    Example vault/            # vault
+      Example folder/         # folder
+        Example note.md       # note
+    Reference/
+      Reading/
+        Notes.md
   .lotus-trash/               # internal recoverable deletion
   .lotus-state/               # locks, area metadata and migration records
 ```
@@ -71,7 +71,7 @@ Folder/note creation inserts an Untitled folder/Untitled row directly into the t
 
 ### Existing content
 
-On opening a pre-0.4 workspace, nested folders move directly under their vault with names such as `Singapore - Verintort`. Name collisions receive a numeric suffix. Root-level notes move into a uniquely named `Recovered notes` folder. Operations rename files/folders without changing their bytes; durable old/new path records live in `.notus-state/migration-*.json`. Migration is idempotent.
+On opening a pre-0.4 workspace, nested folders move directly under their vault with combined names such as `Folder - Subfolder`. Name collisions receive a numeric suffix. Root-level notes move into a uniquely named `Recovered notes` folder. Operations rename files/folders without changing their bytes; durable old/new path records live in `.notus-state/migration-*.json`. Migration is idempotent.
 
 **Vault switcher → Add existing vault…** copies an outside vault, leaving its source unchanged. Imported root notes use `Imported root notes`; nested folders are flattened. Hidden metadata is skipped and linked folders are rejected. New vaults are empty. Old Lattice workspaces are not imported automatically.
 
