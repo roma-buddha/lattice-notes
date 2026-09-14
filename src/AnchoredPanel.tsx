@@ -1,6 +1,8 @@
 import { createPortal } from "react-dom";
 import { useLayoutEffect, useRef } from "react";
 import { type Anchor } from "./sidebarTypes";
+
+let overlaySequence = 0;
 export function AnchoredPanel({
   anchor,
   label,
@@ -17,9 +19,16 @@ export function AnchoredPanel({
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const overlayId = useRef(`lotus-overlay-${++overlaySequence}`);
   const close = useRef(onClose);
   close.current = onClose;
   useLayoutEffect(() => {
+    const overlayKey = overlayId.current;
+    window.dispatchEvent(
+      new CustomEvent("lotus-native-overlay", {
+        detail: { id: overlayKey, open: true },
+      }),
+    );
     const element = ref.current!;
     const peer = anchor.beside;
     const peerWidth = peer?.style.width ?? "";
@@ -91,6 +100,11 @@ export function AnchoredPanel({
     document.addEventListener("keydown", escape);
     window.addEventListener("resize", position);
     return () => {
+      window.dispatchEvent(
+        new CustomEvent("lotus-native-overlay", {
+          detail: { id: overlayKey, open: false },
+        }),
+      );
       resize.disconnect();
       if (peer?.isConnected) {
         peer.style.width = peerWidth;

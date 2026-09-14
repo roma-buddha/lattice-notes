@@ -1009,7 +1009,7 @@ pub async fn hf_files(repository: String) -> Result<Vec<HfFile>, String> {
 }
 #[tauri::command]
 pub async fn hf_download(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     repository: String,
     file: String,
@@ -1096,7 +1096,7 @@ pub async fn hf_download(
     result
 }
 #[tauri::command]
-pub fn hf_cancel(window: tauri::WebviewWindow) {
+pub fn hf_cancel(window: tauri::Webview) {
     if let Ok(active) = downloads().lock() {
         if let Some(sender) = active.get(window.label()) {
             let _ = sender.send(true);
@@ -1368,7 +1368,7 @@ async fn summarize_local(
 #[tauri::command]
 pub async fn ai_chat(
     app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     connection_id: String,
     messages: Vec<Message>,
     context: Option<String>,
@@ -1420,7 +1420,7 @@ pub async fn ai_chat(
     result
 }
 #[tauri::command]
-pub fn ai_stop(window: tauri::WebviewWindow) {
+pub fn ai_stop(window: tauri::Webview) {
     if let Ok(active) = requests().lock() {
         if let Some(sender) = active.get(window.label()) {
             let _ = sender.send(true);

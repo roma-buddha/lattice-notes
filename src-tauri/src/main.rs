@@ -52,7 +52,7 @@ struct TabDropTarget {
 
 #[tauri::command]
 fn register_tab_strip(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<Store>,
     bounds: TabStripInput,
 ) -> Result<(), String> {
@@ -60,8 +60,9 @@ fn register_tab_strip(
     {
         return Err("Invalid tab strip bounds.".into());
     }
-    let origin = window.inner_position().map_err(|e| e.to_string())?;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let host = window.window();
+    let origin = host.inner_position().map_err(|e| e.to_string())?;
+    let scale = host.scale_factor().map_err(|e| e.to_string())?;
     let physical = TabStripBounds {
         x: origin.x as f64 + bounds.x * scale,
         y: origin.y as f64 + bounds.y * scale,
@@ -74,20 +75,21 @@ fn register_tab_strip(
         .tab_strips
         .lock()
         .map_err(|e| e.to_string())?
-        .insert(window.label().into(), physical);
+        .insert(host.label().into(), physical);
     Ok(())
 }
 
 #[tauri::command]
 fn tab_drop_target(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<Store>,
 ) -> Result<Option<TabDropTarget>, String> {
-    let cursor = window.cursor_position().map_err(|e| e.to_string())?;
-    let source = window.label();
+    let host = window.window();
+    let cursor = host.cursor_position().map_err(|e| e.to_string())?;
+    let source = host.label();
     let mut strips = state.tab_strips.lock().map_err(|e| e.to_string())?;
-    strips.retain(|label, _| app.get_webview_window(label).is_some());
+    strips.retain(|label, _| app.get_window(label).is_some());
     Ok(strips.iter().find_map(|(label, bounds)| {
         (label != source
             && cursor.x >= bounds.x
@@ -349,7 +351,7 @@ fn import_markdown(
 }
 #[tauri::command]
 fn relocate_entry(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<Store>,
     path: String,
@@ -370,7 +372,7 @@ fn relocate_entry(
 }
 #[tauri::command]
 fn delete_entry(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<Store>,
     path: String,
@@ -487,7 +489,7 @@ fn preview_conversion(
 }
 #[tauri::command]
 fn convert_vault(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     app: tauri::AppHandle,
     state: tauri::State<Store>,
     source: String,

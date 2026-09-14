@@ -9,7 +9,7 @@ pub fn check_other_views(
     path: &str,
 ) -> Result<(), String> {
     let mut views = store.views.lock().map_err(|e| e.to_string())?;
-    views.retain(|label, _| app.get_webview_window(label).is_some());
+    views.retain(|label, _| app.get_window(label).is_some());
     if views.iter().any(|(label, paths)| {
         label != caller
             && paths
@@ -25,7 +25,7 @@ pub fn check_other_views(
 }
 #[tauri::command]
 pub fn register_view(
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<Store>,
     path: Option<String>,
     additional: Option<Vec<String>>,
@@ -108,15 +108,16 @@ fn note_url(path: &str) -> std::path::PathBuf {
 #[tauri::command]
 pub async fn detach_note(
     app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
+    window: tauri::Webview,
     state: tauri::State<'_, Store>,
     path: String,
     at_cursor: bool,
 ) -> Result<String, String> {
+    let host = window.window();
     if at_cursor {
-        let cursor = window.cursor_position().map_err(|e| e.to_string())?;
-        let origin = window.outer_position().map_err(|e| e.to_string())?;
-        let size = window.outer_size().map_err(|e| e.to_string())?;
+        let cursor = host.cursor_position().map_err(|e| e.to_string())?;
+        let origin = host.outer_position().map_err(|e| e.to_string())?;
+        let size = host.outer_size().map_err(|e| e.to_string())?;
         if cursor.x >= origin.x as f64
             && cursor.y >= origin.y as f64
             && cursor.x < origin.x as f64 + size.width as f64
@@ -141,13 +142,13 @@ pub async fn detach_note(
             .build()
             .map_err(|e| e.to_string())?;
     if at_cursor {
-        if let Ok(p) = window.cursor_position() {
+        if let Ok(p) = host.cursor_position() {
             let _ = next.set_position(tauri::PhysicalPosition::new(
                 p.x as i32 - 100,
                 p.y as i32 - 20,
             ));
         }
-    } else if let Ok(p) = window.outer_position() {
+    } else if let Ok(p) = host.outer_position() {
         let _ = next.set_position(tauri::PhysicalPosition::new(p.x + 40, p.y + 40));
     }
     if let Some(icon) = app.default_window_icon() {
@@ -168,7 +169,7 @@ pub async fn focus_main(
         .lock()
         .map_err(|e| e.to_string())?
         .read(&path)?;
-    if let Some(main) = app.get_webview_window("main") {
+    if let Some(main) = app.get_window("main") {
         main.unminimize().map_err(|e| e.to_string())?;
         main.set_focus().map_err(|e| e.to_string())?;
         Ok(false)

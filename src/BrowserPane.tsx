@@ -98,6 +98,9 @@ export function BrowserPane({
     let disposed = false;
     let frame = 0;
     let lastBounds = "";
+    // A Windows WebView is an HWND, so it is always painted above DOM
+    // popovers. Hide the native surface while a Lotus popup owns interaction.
+    const overlays = new Set<string>();
     const appWindow = getCurrentWindow();
     const owner = Symbol(label);
     browserHosts.set(label, owner);
@@ -106,12 +109,11 @@ export function BrowserPane({
       if (!rect || rect.width < 2 || rect.height < 2 || disposed || !nextUrl)
         return null;
       try {
-        const scale = await appWindow.scaleFactor();
-        if (disposed) return null;
-        // Tauri child-webview bounds are relative to their parent window.
-        // `getBoundingClientRect` is likewise relative to Lotus's main
-        // webview, so adding the parent's desktop position here would offset
-        // the child outside its DOM host and over the sidebar.
+        // The browser host is measured in CSS pixels, but the Windows child
+        // WebView API needs physical pixels. The renderer's DPR is the only
+        // scale guaranteed to describe those DOM measurements; Tauri's window
+        // scale can differ for a child WebView on a mixed-DPI desktop.
+        const scale = window.devicePixelRatio || 1;
         const position = new PhysicalPosition(
           Math.round(rect.left * scale),
           Math.round(rect.top * scale),
@@ -143,7 +145,8 @@ export function BrowserPane({
           await child.hide().catch(() => {});
           return null;
         }
-        await child.show();
+        if (overlays.size) await child.hide();
+        else await child.show();
         if (disposed) await child.hide().catch(() => {});
         return child;
       } catch (error) {
@@ -164,6 +167,16 @@ export function BrowserPane({
     if (main) observer.observe(main);
     window.addEventListener("resize", schedule);
     window.visualViewport?.addEventListener("resize", schedule);
+    const overlay = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: unknown; open?: unknown }>).
+        detail;
+      if (typeof detail?.id !== "string" || typeof detail.open !== "boolean")
+        return;
+      if (detail.open) overlays.add(detail.id);
+      else overlays.delete(detail.id);
+      schedule();
+    };
+    window.addEventListener("lotus-native-overlay", overlay);
     if (url.current) schedule();
     return () => {
       disposed = true;
@@ -171,6 +184,7 @@ export function BrowserPane({
       observer.disconnect();
       window.removeEventListener("resize", schedule);
       window.visualViewport?.removeEventListener("resize", schedule);
+      window.removeEventListener("lotus-native-overlay", overlay);
       // A child view is shared while it moves between panes. Only its last
       // mounted host may hide it, preventing an old host's async cleanup from
       // blanking the newly visible browser.

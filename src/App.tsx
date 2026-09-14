@@ -313,6 +313,22 @@ export default function App() {
     secondaryDoc?.path === doc?.path ? draft : secondaryDraft;
   const secondaryNote = secondaryDoc?.path === doc?.path ? doc : secondaryDoc;
   const [settings, setSettings] = useState(false);
+  // Settings is a DOM modal. When a native browser child is active on Windows,
+  // it otherwise remains above this modal and steals its pointer input.
+  useEffect(() => {
+    if (!settings) return;
+    const id = "lotus-settings-modal";
+    window.dispatchEvent(
+      new CustomEvent("lotus-native-overlay", { detail: { id, open: true } }),
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("lotus-native-overlay", {
+          detail: { id, open: false },
+        }),
+      );
+    };
+  }, [settings]);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiPane, setAiPane] = useState<"primary" | "secondary">("primary");
   const [aiSettings, setAiSettings] = useState(false);
@@ -374,6 +390,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(0);
   const tabSequence = useRef(1);
   const activeTabRef = useRef(0);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const pendingTabSelection = useRef<number | null>(null);
+  const tabSelectionRunning = useRef(false);
+  const tabSelectionVersion = useRef(0);
   const inlineTrigger = useRef<HTMLElement | null>(null);
   const inlineBusy = useRef(false);
   const [name, setName] = useState("");
@@ -1387,40 +1408,58 @@ export default function App() {
     setStatus("Saved");
   };
   const selectTab = async (id: number) => {
-    if (navigating.current) return;
+    // Do not discard a click made while another note is saving or loading.
+    // The latest requested tab is the only one that may update the editor.
+    pendingTabSelection.current = id;
+    tabSelectionVersion.current += 1;
+    if (tabSelectionRunning.current) return;
+    tabSelectionRunning.current = true;
     navigating.current = true;
     try {
-      if (!(await saveAll())) return;
-      const tab = tabs.find((t) => t.id === id);
-      if (!tab) return;
-      if (tab.browser) {
-        setSecondaryBrowser((current) =>
-          current?.id === tab.browser?.id ? null : current,
-        );
-        activeTabRef.current = id;
-        setActiveTab(id);
-        setActivePane("primary");
-        return;
-      }
-      if (tab.release) {
-        if (!releaseHistory) setReleaseHistory(await api.releaseHistory());
-        activeTabRef.current = id;
-        setActiveTab(id);
-        resetDocument();
-        return;
-      }
-      const next = tab.path ? await api.read(tab.path) : null;
-      activeTabRef.current = id;
-      setActiveTab(id);
-      if (next) {
-        setError("");
-        loadDocument(next);
-        setSelected(next.path);
-      } else {
-        resetDocument();
-        storage.remove(`notus-last:${current.current.root}`);
+      while (pendingTabSelection.current !== null) {
+        const requested = pendingTabSelection.current;
+        pendingTabSelection.current = null;
+        const version = tabSelectionVersion.current;
+        if (!(await saveAll())) continue;
+        // A newer click arrived while saving. Skip this stale selection before
+        // it starts an unnecessary read.
+        if (pendingTabSelection.current !== null) continue;
+        const tab = tabsRef.current.find((item) => item.id === requested);
+        if (!tab) continue;
+        if (tab.browser) {
+          setSecondaryBrowser((current) =>
+            current?.id === tab.browser?.id ? null : current,
+          );
+          activeTabRef.current = requested;
+          setActiveTab(requested);
+          setActivePane("primary");
+          continue;
+        }
+        if (tab.release) {
+          if (!releaseHistory) setReleaseHistory(await api.releaseHistory());
+          if (version !== tabSelectionVersion.current) continue;
+          activeTabRef.current = requested;
+          setActiveTab(requested);
+          resetDocument();
+          continue;
+        }
+        const next = tab.path ? await api.read(tab.path) : null;
+        // A read may finish after another tab was clicked. Its result must not
+        // overwrite the newer tab's document.
+        if (version !== tabSelectionVersion.current) continue;
+        activeTabRef.current = requested;
+        setActiveTab(requested);
+        if (next) {
+          setError("");
+          loadDocument(next, requested);
+          setSelected(next.path);
+        } else {
+          resetDocument();
+          storage.remove(`notus-last:${current.current.root}`);
+        }
       }
     } finally {
+      tabSelectionRunning.current = false;
       navigating.current = false;
     }
   };
@@ -2108,6 +2147,31 @@ export default function App() {
       else await openExtraTab(transfer.path, false, before);
     }
   };
+  const moveTab = (
+    id: number,
+    targetId: number,
+    placement: "before" | "after",
+  ) => {
+    setTabs((previous) => {
+      const moving = previous.find((tab) => tab.id === id);
+      const target = previous.find((tab) => tab.id === targetId);
+      if (
+        !moving ||
+        !target ||
+        moving.pinned ||
+        target.pinned ||
+        moving.id === target.id
+      )
+        return previous;
+      // Compute the target index after removing the moving tab. This makes
+      // before/after deterministic even for adjacent tabs.
+      const rest = previous.filter((tab) => tab.id !== moving.id);
+      const targetIndex = rest.findIndex((tab) => tab.id === target.id);
+      if (targetIndex < 0) return previous;
+      rest.splice(targetIndex + (placement === "after" ? 1 : 0), 0, moving);
+      return rest;
+    });
+  };
   const returnTab = async (id: number) => {
     const tab = tabs.find((t) => t.id === id);
     if (!tab?.path || !(await saveAll())) return;
@@ -2308,6 +2372,7 @@ export default function App() {
         active={activeTab}
         selectTab={(id) => run(() => selectTab(id))}
         closeTab={(id) => run(() => closeTab(id))}
+        moveTab={moveTab}
         dropTab={(transfer, before) => run(() => dropTab(transfer, before))}
         finishTabDrag={(id) => run(() => finishTabDrag(id))}
         theme={theme}

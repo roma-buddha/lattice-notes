@@ -39,6 +39,7 @@ export function TitleBar({
   active,
   selectTab,
   closeTab,
+  moveTab,
   dropTab,
   finishTabDrag,
   theme,
@@ -56,6 +57,7 @@ export function TitleBar({
   active: number;
   selectTab: (id: number) => void;
   closeTab: (id: number) => void;
+  moveTab: (id: number, targetId: number, placement: "before" | "after") => void;
   dropTab: (transfer: TabTransfer, before?: number) => void;
   finishTabDrag: (id: number) => void;
   theme: "light" | "dark";
@@ -81,7 +83,12 @@ export function TitleBar({
     startY: number;
     active: boolean;
   } | null>(null);
-  const suppressTabClick = useRef(false);
+  const suppressTabClick = useRef<number | null>(null);
+  const releaseSuppressedTabClick = (id: number) => {
+    window.setTimeout(() => {
+      if (suppressTabClick.current === id) suppressTabClick.current = null;
+    }, 0);
+  };
   useEffect(() => {
     const element = strip.current;
     if (!element) return;
@@ -352,7 +359,7 @@ export function TitleBar({
                 )
                   return;
                 drag.active = true;
-                suppressTabClick.current = true;
+                suppressTabClick.current = drag.id;
               }
               const target = document
                 .elementFromPoint(event.clientX, event.clientY)
@@ -397,38 +404,27 @@ export function TitleBar({
                   ),
                 );
                 setInsert(null);
-                window.setTimeout(() => {
-                  suppressTabClick.current = false;
-                }, 0);
+                releaseSuppressedTabClick(drag.id);
                 return;
               }
               if (target?.dataset.pinned) {
                 setInsert(null);
+                releaseSuppressedTabClick(drag.id);
                 return;
               }
               const targetId = Number(target?.dataset.tabId);
               if (Number.isFinite(targetId) && targetId !== drag.id) {
                 const rect = target!.getBoundingClientRect();
-                const index = tabs.findIndex(
-                  (candidate) => candidate.id === targetId,
-                );
-                const before =
+                moveTab(
+                  drag.id,
+                  targetId,
                   event.clientX < rect.left + rect.width / 2
-                    ? targetId
-                    : tabs[index + 1]?.id;
-                dropTab(
-                  {
-                    id: drag.id,
-                    path: tab.path ?? undefined,
-                    source: getCurrentWindow().label,
-                  },
-                  before,
+                    ? "before"
+                    : "after",
                 );
               }
               setInsert(null);
-              window.setTimeout(() => {
-                suppressTabClick.current = false;
-              }, 0);
+              releaseSuppressedTabClick(drag.id);
             }}
             onDragOver={(event) => {
               if (
@@ -496,8 +492,9 @@ export function TitleBar({
                 (tab.pinned ? "Current note" : "Organize workspace")
               }
               onClick={(event) => {
-                if (suppressTabClick.current) {
+                if (suppressTabClick.current === tab.id) {
                   event.preventDefault();
+                  suppressTabClick.current = null;
                   return;
                 }
                 selectTab(tab.id);

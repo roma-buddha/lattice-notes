@@ -2,6 +2,18 @@
 
 This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
+## 0.14.12 — 2026-09-14 — Reliable browser overlays and tab switching
+
+- Fixed the native browser child turning Lotus into a multi-WebView host while normal workspace commands still expected a single-webview window. Vault selection, note/view bookkeeping, drag targets, detached notes, and AI request/download controls now address their host window safely while a browser tab is open; the misleading **current webview is not a WebviewWindow** error no longer appears.
+- Added a native-overlay handoff for Settings and anchored menus. When a Lotus modal or vault chooser opens, the browser child hides so the dialog is visible and clickable; it returns to its exact note-pane bounds when the overlay closes.
+- Replaced tab click suppression during save/read with a latest-intent selection queue. A delayed read for an older tab can no longer overwrite the document selected by a newer tab click.
+- Separated same-strip tab reordering from note drops and detached-window transfer. Tabs can be dropped before or after another non-pinned tab with a deterministic insertion index, including adjacent tabs.
+- Extended browser/tab smoke coverage to verify Alpha/Beta selection and before/after tab reordering.
+
+**Compatibility:** no vault, note, draft, browser-profile, organizer, or AI-connection migration is required.
+
+**Verification:** TypeScript production build, frontend lint, 35 frontend tests, and 28 native Rust tests passed. The isolated native browser smoke test requires Lotus to be closed because Lotus enforces a single application instance.
+
 ## 0.14.11 — 2026-09-14 — Reliable embedded browser and Current note selection
 
 - Corrected native WebView2 browser placement using the main webview's desktop client origin plus the browser host bounds. Browser pages now occupy only the note workspace, leaving the sidebar and tab strip interactive.

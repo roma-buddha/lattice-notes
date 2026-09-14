@@ -143,8 +143,58 @@ try {
     async () => (await page.locator(".note-title").inputValue()) === "Alpha",
     "Dropping a note on Current note did not replace its document",
   );
+  // A dropped note becomes an extra tab. Switching must always load its own
+  // document, even when clicks occur while the previous note is being saved.
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("lotus-note-pointer-drop", {
+        detail: { path: "Work/Notes/Beta.md", target: "tabs" },
+      }),
+    ),
+  );
+  await page.getByRole("tab", { name: "Beta", exact: true }).waitFor();
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("lotus-note-pointer-drop", {
+        detail: { path: "Work/Notes/Alpha.md", target: "tabs" },
+      }),
+    ),
+  );
+  const alphaTab = page.getByRole("tab", { name: "Alpha", exact: true });
+  const betaTab = page.getByRole("tab", { name: "Beta", exact: true });
+  await alphaTab.waitFor();
+  await betaTab.waitFor();
+  await betaTab.click();
+  await until(
+    async () => (await page.locator(".note-title").inputValue()) === "Beta",
+    "Selecting Beta did not replace Alpha in the editor",
+  );
+  await alphaTab.click();
+  await until(
+    async () => (await page.locator(".note-title").inputValue()) === "Alpha",
+    "Selecting Alpha did not replace Beta in the editor",
+  );
+  const dragTab = async (from, to, fraction) => {
+    const source = await from.boundingBox();
+    const target = await to.boundingBox();
+    assert.ok(source && target, "Tab bounds were not available for reorder");
+    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(target.x + target.width * fraction, target.y + target.height / 2, { steps: 5 });
+    await page.mouse.up();
+  };
+  await dragTab(betaTab, alphaTab, 0.2);
+  await until(async () => {
+    const labels = await page.locator('[role="tab"]').allTextContents();
+    return labels.indexOf("Beta") < labels.indexOf("Alpha");
+  }, "Dragging Beta before Alpha did not reorder the tabs");
+  await dragTab(betaTab, alphaTab, 0.8);
+  await until(async () => {
+    const labels = await page.locator('[role="tab"]').allTextContents();
+    return labels.indexOf("Alpha") < labels.indexOf("Beta");
+  }, "Dragging Beta after Alpha did not reorder the tabs");
   console.log(
-    "Browser navigation and Current note close, reopen, and drop replacement passed.",
+    "Browser navigation, tab selection, and before/after reordering passed.",
   );
 } finally {
   await browser?.close().catch(() => {});
