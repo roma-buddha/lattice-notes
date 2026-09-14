@@ -95,6 +95,27 @@ try {
         .some((candidate) => candidate.url() === "https://example.com/"),
     "Browser tab did not navigate inside its WebView",
   );
+  const dragTab = async (from, to, fraction) => {
+    const source = await from.boundingBox();
+    const target = await to.boundingBox();
+    assert.ok(source && target, "Tab bounds were not available for drag");
+    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(target.x + target.width * fraction, target.y + target.height / 2, { steps: 5 });
+    await page.mouse.up();
+  };
+  const browserTab = page.getByRole("tab", { name: "example.com", exact: true });
+  const organizerTab = page.getByRole("tab", { name: "Organizer", exact: true });
+  await dragTab(browserTab, organizerTab, 0.2);
+  await until(async () => {
+    const labels = await page.locator('[role="tab"]').allTextContents();
+    return labels.indexOf("example.com") < labels.indexOf("Organizer");
+  }, "Dragging the browser tab before a tab did not reorder it");
+  await dragTab(browserTab, organizerTab, 0.8);
+  await until(async () => {
+    const labels = await page.locator('[role="tab"]').allTextContents();
+    return labels.indexOf("Organizer") < labels.indexOf("example.com");
+  }, "Dragging the browser tab after a tab did not reorder it");
 
   // An active browser tab must split with the retained note rather than
   // replacing the split layout. The native WebView moves into pane two.
@@ -109,6 +130,31 @@ try {
     "Splitting an active browser tab did not place it beside the note",
   );
   assert.equal(await page.locator(".note-title").inputValue(), "Alpha");
+  await browserTab.click();
+  await until(
+    async () =>
+      (await page.locator(".editor-panes.split-right").count()) === 1 &&
+      (await page
+        .locator('[aria-label="First note pane"] [aria-label="Browser"]')
+        .count()) === 1,
+    "Selecting a browser tab replaced the split instead of using the active pane",
+  );
+  await dragTab(browserTab, page.locator('[aria-label="Second note pane"]'), 0.5);
+  await until(
+    async () =>
+      (await page
+        .locator('[aria-label="Second note pane"] [aria-label="Browser"]')
+        .count()) === 1,
+    "Dropping a browser tab on pane two did not move it there",
+  );
+  await page
+    .locator('[aria-label="Second note pane"]')
+    .getByRole("button", { name: "Close browser tab", exact: true })
+    .click();
+  await until(
+    async () => (await page.getByRole("tab", { name: "example.com", exact: true }).count()) === 0,
+    "Closing the browser from its pane did not remove its tab",
+  );
   await page.getByRole("button", { name: "Split view", exact: true }).click();
   await page.getByRole("menuitem", { name: "Top and bottom", exact: true }).click();
   await until(
@@ -204,15 +250,6 @@ try {
     async () => (await page.locator(".note-title").inputValue()) === "Alpha",
     "A temporary tab with pointer jitter did not replace Beta in the editor",
   );
-  const dragTab = async (from, to, fraction) => {
-    const source = await from.boundingBox();
-    const target = await to.boundingBox();
-    assert.ok(source && target, "Tab bounds were not available for reorder");
-    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(target.x + target.width * fraction, target.y + target.height / 2, { steps: 5 });
-    await page.mouse.up();
-  };
   await dragTab(betaTab, alphaTab, 0.2);
   await until(async () => {
     const labels = await page.locator('[role="tab"]').allTextContents();

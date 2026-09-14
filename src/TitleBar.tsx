@@ -89,6 +89,23 @@ export function TitleBar({
       if (suppressTabClick.current === id) suppressTabClick.current = null;
     }, 0);
   };
+  const paneAt = (clientX: number, clientY: number) => {
+    for (const target of ["primary-pane", "secondary-pane"] as const) {
+      const pane = [...document.querySelectorAll<HTMLElement>(
+        `[data-lotus-drop="${target}"]`,
+      )].find((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+        );
+      });
+      if (pane) return target;
+    }
+    return null;
+  };
   useEffect(() => {
     const element = strip.current;
     if (!element) return;
@@ -379,15 +396,25 @@ export function TitleBar({
               pointerTab.current = null;
               if (event.currentTarget.hasPointerCapture(event.pointerId))
                 event.currentTarget.releasePointerCapture(event.pointerId);
-              if (!drag.active) return;
+              // Pointer capture gives temporary tabs a reliable release even
+              // when Windows consumes their DOM click for titlebar dragging.
+              // Selecting here also keeps a browser reorder from activating
+              // the browser before the pointer has become a real drag.
+              if (!drag.active) {
+                selectTab(drag.id);
+                return;
+              }
               let completedDrop = false;
+              const pane = paneAt(event.clientX, event.clientY);
               const target = document
                 .elementFromPoint(event.clientX, event.clientY)
                 ?.closest<HTMLElement>("[data-tab-id], [data-lotus-drop]");
               if (
+                pane ||
                 target?.dataset.lotusDrop === "primary-pane" ||
                 target?.dataset.lotusDrop === "secondary-pane"
               ) {
+                const paneTarget = pane ?? target?.dataset.lotusDrop;
                 window.dispatchEvent(
                   new CustomEvent(
                     tab.browser
@@ -396,10 +423,10 @@ export function TitleBar({
                     {
                       detail: tab.browser
                         ? {
-                            browserId: tab.browser.id,
-                            target: target.dataset.lotusDrop,
+                          browserId: tab.browser.id,
+                            target: paneTarget,
                           }
-                        : { path: tab.path, target: target.dataset.lotusDrop },
+                        : { path: tab.path, target: paneTarget },
                     },
                   ),
                 );
@@ -411,8 +438,9 @@ export function TitleBar({
               if (target?.dataset.pinned) {
                 setInsert(null);
                 // Returning a dragged temporary tab to itself is still a tab
-                // selection, not a completed reorder. Let its click through.
+                // selection, not a completed reorder.
                 suppressTabClick.current = null;
+                selectTab(drag.id);
                 return;
               }
               const targetId = Number(target?.dataset.tabId);
@@ -429,7 +457,10 @@ export function TitleBar({
               }
               setInsert(null);
               if (completedDrop) releaseSuppressedTabClick(drag.id);
-              else suppressTabClick.current = null;
+              else {
+                suppressTabClick.current = null;
+                selectTab(drag.id);
+              }
             }}
             onDragOver={(event) => {
               if (
@@ -497,12 +528,10 @@ export function TitleBar({
                 (tab.pinned ? "Current note" : "Organize workspace")
               }
               onPointerDown={(event) => {
-                // On the undecorated Windows titlebar, a real mouse release
-                // can be claimed by the native drag surface before it becomes
-                // a DOM click. Select before the surrounding tab container
-                // starts tracking a possible reorder. Keyboard activation is
-                // still handled by the click fallback below.
-                if (event.button === 0) selectTab(tab.id);
+                // Pinned tabs do not use the captured temporary-tab route.
+                // All other tabs select on the wrapper's pointer release so a
+                // drag can reorder without first activating its browser view.
+                if (tab.pinned && event.button === 0) selectTab(tab.id);
               }}
               onClick={(event) => {
                 if (suppressTabClick.current === tab.id) {

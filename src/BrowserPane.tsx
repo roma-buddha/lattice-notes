@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { Webview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ChevronLeft, ChevronRight, Globe2, RotateCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Globe2, RotateCw, X } from "lucide-react";
 import { api } from "./notus";
 import {
   browserAddress,
@@ -75,10 +75,12 @@ export function BrowserPane({
   browser,
   onAddress,
   onError,
+  onClose,
 }: {
   browser: BrowserSession;
   onAddress: (url: string) => void;
   onError: (message: string) => void;
+  onClose?: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<Webview | null>(null);
@@ -282,6 +284,17 @@ export function BrowserPane({
             onBlur={refreshAddress}
           />
         </form>
+        {onClose && (
+          <button
+            type="button"
+            className="icon"
+            title="Close browser tab"
+            aria-label="Close browser tab"
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        )}
       </div>
       <div
         ref={host}

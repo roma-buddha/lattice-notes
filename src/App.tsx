@@ -416,6 +416,7 @@ export default function App() {
     tabs.find((t) => t.id === activeTab)?.organizer === true;
   const releaseActive = tabs.find((t) => t.id === activeTab)?.release === true;
   const browserActive = tabs.find((t) => t.id === activeTab)?.browser;
+  const primaryBrowser = Boolean(browserActive && splitView);
   const files = useMemo(() => flatten(visibleEntries), [visibleEntries]);
   const selectedEntry = files.find((e) => e.path === selected);
   const folder =
@@ -843,6 +844,19 @@ export default function App() {
     setSplitRatio(50);
     setSplitView(direction);
   };
+  const ensureSecondaryNote = () => {
+    if (secondaryRef.current.doc || !current.current.doc) return;
+    secondaryRef.current = {
+      doc: current.current.doc,
+      draft: current.current.draft,
+    };
+    setSecondaryDoc(current.current.doc);
+    setSecondaryDraft(current.current.draft);
+  };
+  const primaryNoteTab = () =>
+    current.current.doc
+      ? tabsRef.current.find((tab) => tab.path === current.current.doc?.path)
+      : undefined;
   const closeSplit = async () => {
     if (!(await saveAll())) return;
     secondaryRef.current = { doc: null, draft: "" };
@@ -1455,6 +1469,28 @@ export default function App() {
         const tab = tabsRef.current.find((item) => item.id === requested);
         if (!tab) continue;
         if (tab.browser) {
+          if (splitView && current.current.doc) {
+            if (activePane === "primary") {
+              // Keep the split and place the selected browser in the pane the
+              // user is working in. Its underlying note becomes pane two.
+              ensureSecondaryNote();
+              setSecondaryBrowser(null);
+              activeTabRef.current = requested;
+              setActiveTab(requested);
+              setActivePane("primary");
+            } else {
+              // Browser tabs selected from a split stay in the split instead
+              // of unexpectedly replacing the entire workspace.
+              setSecondaryBrowser(tab.browser);
+              const primary = primaryNoteTab();
+              if (primary) {
+                activeTabRef.current = primary.id;
+                setActiveTab(primary.id);
+              }
+              setActivePane("secondary");
+            }
+            continue;
+          }
           setSecondaryBrowser((current) =>
             current?.id === tab.browser?.id ? null : current,
           );
@@ -1591,10 +1627,15 @@ export default function App() {
       if (detail.target === "secondary-pane") {
         setSecondaryBrowser(browser);
         if (activeTabRef.current === browserId) {
-          activeTabRef.current = 0;
-          setActiveTab(0);
+          const primary = primaryNoteTab();
+          if (primary) {
+            activeTabRef.current = primary.id;
+            setActiveTab(primary.id);
+          }
         }
+        setActivePane("secondary");
       } else if (detail.target === "primary-pane") {
+        ensureSecondaryNote();
         setSecondaryBrowser((current) =>
           current?.id === browserId ? null : current,
         );
@@ -1650,6 +1691,17 @@ export default function App() {
       if (activeTabRef.current === id) return;
     }
     setTabs((previous) => previous.filter((tab) => tab.id !== id));
+  };
+  const closeBrowserPane = async (
+    id: number,
+    pane: "primary" | "secondary",
+  ) => {
+    await closeTab(id);
+    if (pane === "secondary" && !secondaryRef.current.doc) {
+      setSecondaryBrowser(null);
+      setSplitView(null);
+      setActivePane("primary");
+    }
   };
   const closeAll = async () => {
     if (!(await saveAll())) return;
@@ -2791,11 +2843,12 @@ export default function App() {
                 </Suspense>
               </div>
             </section>
-          ) : browserActive ? (
+          ) : browserActive && !splitView ? (
             <section className="note-view browser-note-view">
               <BrowserPane
                 browser={browserActive}
                 onError={setError}
+                onClose={() => run(() => closeBrowserPane(browserActive.id, "primary"))}
                 onAddress={(url) =>
                   setTabs((previous) =>
                     previous.map((tab) =>
@@ -2826,6 +2879,7 @@ export default function App() {
                   <section
                     className={`primary-pane-wrap ${activePane === "primary" ? "pane-active" : ""}`}
                     aria-label="First note pane"
+                    data-lotus-drop="primary-pane"
                     onFocusCapture={() => setActivePane("primary")}
                     onPointerDown={(e) => {
                       setActivePane("primary");
@@ -2835,6 +2889,32 @@ export default function App() {
                       );
                     }}
                   >
+                    {primaryBrowser ? (
+                      <BrowserPane
+                        browser={browserActive!}
+                        onError={setError}
+                        onClose={() =>
+                          run(() => closeBrowserPane(browserActive!.id, "primary"))
+                        }
+                        onAddress={(url) =>
+                          setTabs((previous) =>
+                            previous.map((tab) =>
+                              tab.browser?.id === browserActive!.id
+                                ? {
+                                    ...tab,
+                                    browser: {
+                                      ...tab.browser,
+                                      url,
+                                      title: browserTitle(url),
+                                    },
+                                  }
+                                : tab,
+                            ),
+                          )
+                        }
+                      />
+                    ) : (
+                      <>
                     <NoteHeader
                       note={doc}
                       status={status}
@@ -3004,6 +3084,8 @@ export default function App() {
                         </Suspense>
                       )}
                     </div>
+                      </>
+                    )}
                   </section>
                   {splitView && (secondaryNote || secondaryBrowser) && (
                     <>
@@ -3074,6 +3156,7 @@ export default function App() {
                       <section
                         className={`secondary-pane-wrap ${activePane === "secondary" ? "pane-active" : ""}`}
                         aria-label="Second note pane"
+                        data-lotus-drop="secondary-pane"
                         onFocusCapture={() => setActivePane("secondary")}
                         onPointerDown={(e) => {
                           setActivePane("secondary");
@@ -3103,6 +3186,11 @@ export default function App() {
                           <BrowserPane
                             browser={secondaryBrowser}
                             onError={setError}
+                            onClose={() =>
+                              run(() =>
+                                closeBrowserPane(secondaryBrowser.id, "secondary"),
+                              )
+                            }
                             onAddress={(url) => {
                               const updated = {
                                 ...secondaryBrowser,

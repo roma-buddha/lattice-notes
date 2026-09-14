@@ -174,9 +174,9 @@ export function AppSettings({
               <h3>About Lotus</h3>
               <p>Lotus is a local-first workspace for Markdown notes. Your notes remain in the folders you choose on this computer.</p>
               <h4>Project</h4>
-              <p>Lotus is an educational project by VISTU LAB.</p>
+              <p>Lotus is an educational project by VISTU LABS.</p>
               <h4>License</h4>
-              <p>© 2026 VISTU LAB. Lotus is licensed under the MIT License.</p>
+              <p>© 2026 VISTU LABS. Lotus is licensed under the MIT License.</p>
               <p className="muted">You may use, copy, modify, publish, distribute, sublicense, and sell copies of Lotus, provided its copyright and MIT license notice are retained. It is provided without warranty. See the bundled LICENSE file for the complete terms.</p>
               <h4>Release</h4>
               <p>Lotus {release.version}</p>

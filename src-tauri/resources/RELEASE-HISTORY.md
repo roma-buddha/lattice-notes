@@ -2,6 +2,17 @@
 
 This is Lotus’s built-in, read-only release record. It opens from **Settings → About** and is stored with the application rather than in a vault. Every release entry records its date, user-facing behavior, compatibility or data-handling notes, and verification. Future releases must add a dated, detailed entry here before packaging.
 
+## 1.0.0 — 2026-09-14 — Stable MVP
+
+- Established Lotus’s first stable public release: a local Markdown workspace with vaults, folders, notes, organized tabs, editable Markdown, split views, local drafts/recovery, import/export, and configurable AI connections.
+- Finalized native browser tabs: browser sessions are contained within Lotus’s note workspace, can be reordered with normal tabs, remain in split view when selected, can be placed into either pane by dragging, and can be closed from their own toolbar.
+- Hardened tab interaction on the undecorated Windows titlebar. Temporary tabs select from captured pointer release, tolerate small pointer movement, and retain deterministic before/after reordering without an accidental browser activation.
+- Updated Settings → About attribution to **VISTU LABS**.
+
+**Compatibility:** no vault, note, draft, browser-profile, organizer, or AI-connection migration is required. Existing Lotus workspaces remain compatible.
+
+**Verification:** TypeScript production build, frontend lint, 35 frontend tests, 28 native Rust tests, and isolated native browser/tab/split smoke coverage passed before packaging.
+
 ## 0.14.13 — 2026-09-14 — Browser-and-note split workspace
 
 - Fixed temporary tab selection on the Windows undecorated titlebar. Native drag handling could consume a real mouse-release before it became a DOM click, leaving the old note visible. A primary pointer-down now selects the tab before optional drag tracking begins, while keyboard tab activation remains supported.
